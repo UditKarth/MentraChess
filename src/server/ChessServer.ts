@@ -28,6 +28,8 @@ import {
     checkGameEnd,
     getLegalMoves
 } from '../chess_logic';
+import { StockfishService } from '../services/StockfishService';
+import { stockfishMoveToInternal } from '../utils/stockfishUtils';
 
 interface GameSession {
     sessionId: string;
@@ -42,6 +44,7 @@ export class ChessServer extends TpaServer {
     private gameSessions: Map<string, GameSession> = new Map();
     private readonly CLARIFICATION_TIMEOUT = 30000; // 30 seconds
     private readonly AI_MOVE_DELAY = 2000; // 2 seconds for AI "thinking"
+    private stockfishService: StockfishService;
 
     constructor() {
         super({
@@ -51,6 +54,21 @@ export class ChessServer extends TpaServer {
             healthCheck: true,
             publicDir: false
         });
+        
+        // Initialize Stockfish service
+        console.log('Initializing Stockfish service in ChessServer...');
+        try {
+            this.stockfishService = new StockfishService();
+            if (this.stockfishService.isEngineReady()) {
+                console.log('Stockfish service initialized successfully');
+            } else {
+                console.log('Stockfish service initialized (fallback mode - using simple AI)');
+            }
+        } catch (error) {
+            console.warn('Failed to initialize Stockfish service:', error);
+            console.log('Continuing with simple AI fallback...');
+            this.stockfishService = null as any;
+        }
     }
 
     protected async onSession(session: TpaSession, sessionId: string, userId: string): Promise<void> {
@@ -676,52 +694,93 @@ export class ChessServer extends TpaServer {
     private async makeAIMove(gameSession: GameSession): Promise<void> {
         const { appSession, state } = gameSession;
 
-        await appSession.layouts.showTextWall("AI is thinking...", { durationMs: this.AI_MOVE_DELAY });
+        // Show thinking indicator
+        await appSession.layouts.showTextWall("AI is thinking...", { durationMs: 0 });
 
-        // Simple AI: random legal move (placeholder for Stockfish integration)
-        const aiMove = this.generateSimpleAIMove(state);
-        
-        if (aiMove) {
-            const { updatedBoard, capturedPiece } = executeMove(state.board, aiMove.source, aiMove.target);
-            state.board = updatedBoard;
+        try {
+            let aiMove: { source: Coordinates; target: Coordinates; piece: Piece } | null = null;
 
-            // Update captured pieces
-            if (capturedPiece !== ' ') {
-                if (state.userColor === PlayerColor.BLACK) {
-                    state.capturedByWhite.push(capturedPiece);
-                } else {
-                    state.capturedByBlack.push(capturedPiece);
+            // Try to use Stockfish if available
+            if (this.stockfishService && this.stockfishService.isEngineReady()) {
+                try {
+                    const stockfishMove = await this.stockfishService.getBestMove(
+                        state, 
+                        state.aiDifficulty || Difficulty.MEDIUM,
+                        3000 // 3 second time limit
+                    );
+                    
+                    if (stockfishMove) {
+                        const internalMove = stockfishMoveToInternal(stockfishMove, state.board);
+                        if (internalMove) {
+                            aiMove = {
+                                source: internalMove.source,
+                                target: internalMove.target,
+                                piece: internalMove.piece
+                            };
+                        }
+                    }
+                } catch (stockfishError) {
+                    console.warn('Stockfish move failed, falling back to simple AI:', stockfishError);
                 }
             }
 
-            // Update game state
-            state.currentPlayer = state.currentPlayer === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
-            state.currentFEN = boardToFEN(state);
+            // Fallback to simple AI if Stockfish is not available or fails
+            if (!aiMove) {
+                aiMove = this.generateSimpleAIMove(state);
+            }
+            
+            if (aiMove) {
+                const { updatedBoard, capturedPiece } = executeMove(state.board, aiMove.source, aiMove.target);
+                state.board = updatedBoard;
 
-            // Display AI move
-            const sourceSquare = coordsToAlgebraic(aiMove.source);
-            const targetSquare = coordsToAlgebraic(aiMove.target);
-            await appSession.layouts.showTextWall(
-                `AI moved ${aiMove.piece} from ${sourceSquare} to ${targetSquare}`,
-                { durationMs: 2000 }
-            );
+                // Update captured pieces
+                if (capturedPiece !== ' ') {
+                    if (state.userColor === PlayerColor.BLACK) {
+                        state.capturedByWhite.push(capturedPiece);
+                    } else {
+                        state.capturedByBlack.push(capturedPiece);
+                    }
+                }
 
-            // Display updated board
-            await displayBoard(appSession, gameSession.userId, state);
+                // Update game state
+                state.currentPlayer = state.currentPlayer === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
+                state.currentFEN = boardToFEN(state);
 
-            // Update dashboard
-            this.updateDashboardContent(gameSession);
+                // Display AI move
+                const sourceSquare = coordsToAlgebraic(aiMove.source);
+                const targetSquare = coordsToAlgebraic(aiMove.target);
+                await appSession.layouts.showTextWall(
+                    `AI moved ${aiMove.piece} from ${sourceSquare} to ${targetSquare}`,
+                    { durationMs: 2000 }
+                );
 
-                    // Check for game over
-        const gameEnd = checkGameEnd(state.board, state.currentPlayer);
-        if (gameEnd.isOver) {
-            const message = gameEnd.reason === 'checkmate' ? 'Checkmate!' : 
-                           gameEnd.reason === 'stalemate' ? 'Stalemate!' : 'Game Over!';
-            await this.handleGameOver(gameSession, message, gameEnd.result);
-            return;
-        }
+                // Display updated board
+                await displayBoard(appSession, gameSession.userId, state);
 
-            // Switch to user turn
+                // Update dashboard
+                this.updateDashboardContent(gameSession);
+
+                // Check for game over
+                const gameEnd = checkGameEnd(state.board, state.currentPlayer);
+                if (gameEnd.isOver) {
+                    const message = gameEnd.reason === 'checkmate' ? 'Checkmate!' : 
+                                   gameEnd.reason === 'stalemate' ? 'Stalemate!' : 'Game Over!';
+                    await this.handleGameOver(gameSession, message, gameEnd.result);
+                    return;
+                }
+
+                // Switch to user turn
+                state.mode = SessionMode.USER_TURN;
+                await this.promptUserMove(gameSession);
+            } else {
+                // No valid move found
+                await appSession.layouts.showTextWall("AI couldn't find a valid move", { durationMs: 2000 });
+                state.mode = SessionMode.USER_TURN;
+                await this.promptUserMove(gameSession);
+            }
+        } catch (error) {
+            console.error('Error in AI move:', error);
+            await appSession.layouts.showTextWall("AI move failed, your turn", { durationMs: 2000 });
             state.mode = SessionMode.USER_TURN;
             await this.promptUserMove(gameSession);
         }
@@ -862,6 +921,16 @@ export class ChessServer extends TpaServer {
         // Clean up all active sessions
         for (const [sessionId, gameSession] of this.gameSessions) {
             await this.onStop(sessionId, gameSession.userId, 'server shutdown');
+        }
+        
+        // Stop Stockfish service
+        if (this.stockfishService) {
+            try {
+                await this.stockfishService.stop();
+                console.log('Stockfish service stopped successfully');
+            } catch (error) {
+                console.warn('Error stopping Stockfish service:', error);
+            }
         }
         
         await super.stop();
