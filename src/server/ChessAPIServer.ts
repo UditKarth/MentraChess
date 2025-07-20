@@ -81,19 +81,23 @@ export class ChessAPIServer extends ChessServer {
 
         // Create a new game (for testing or external integration)
         expressApp.post('/api/games', (req: any, res: any) => {
-            const { userId, userColor, difficulty } = req.body;
+            const { userId, userColor, difficulty, sessionId: providedSessionId } = req.body;
 
             if (!userId) {
                 return res.status(400).json({ error: 'userId is required' });
             }
 
-            // Create a mock session for testing
-            const sessionId = `test_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            
+            // Use provided sessionId or generate a new one
+            const sessionId = providedSessionId || `test_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+            // Try to get settings from a session if available
+            const color = userColor || 'white';
+            const diff = difficulty || 'medium';
+
             const initialState: SessionState = {
                 mode: SessionMode.USER_TURN,
-                userColor: userColor || PlayerColor.WHITE,
-                aiDifficulty: difficulty || Difficulty.MEDIUM,
+                userColor: color === 'white' ? PlayerColor.WHITE : PlayerColor.BLACK,
+                aiDifficulty: diff === 'easy' ? Difficulty.EASY : diff === 'hard' ? Difficulty.HARD : Difficulty.MEDIUM,
                 board: initializeBoard(),
                 capturedByWhite: [],
                 capturedByBlack: [],

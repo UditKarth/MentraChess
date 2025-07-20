@@ -61,11 +61,15 @@ export class ChessServer extends AppServer {
     protected async onSession(session: AppSession, sessionId: string, userId: string): Promise<void> {
         this.logger.info('New chess session started', { sessionId, userId });
 
+        // Get settings from MentraOS
+        const userColor = session.settings.get<string>('user_color', 'white');
+        const aiDifficulty = session.settings.get<string>('ai_difficulty', 'medium');
+
         // Initialize game state
         const initialState: SessionState = {
-            mode: SessionMode.INITIALIZING,
-            userColor: PlayerColor.NONE,
-            aiDifficulty: null,
+            mode: SessionMode.USER_TURN, // Start directly at user turn
+            userColor: userColor === 'white' ? PlayerColor.WHITE : PlayerColor.BLACK,
+            aiDifficulty: aiDifficulty === 'easy' ? Difficulty.EASY : aiDifficulty === 'hard' ? Difficulty.HARD : Difficulty.MEDIUM,
             board: initializeBoard(),
             capturedByWhite: [],
             capturedByBlack: [],
@@ -92,8 +96,8 @@ export class ChessServer extends AppServer {
         // Set up dashboard integration
         this.setupDashboardIntegration(sessionId);
 
-        // Start the game flow
-        await this.startGameFlow(sessionId);
+        // Start the game directly (skip color/difficulty selection)
+        await this.startGame(sessionId);
     }
 
     protected async onStop(sessionId: string, userId: string, reason: string): Promise<void> {
@@ -261,110 +265,6 @@ export class ChessServer extends AppServer {
         }
     }
 
-    private async startGameFlow(sessionId: string): Promise<void> {
-        const gameSession = this.sessionManager.getSession(sessionId);
-        if (!gameSession) return;
-
-        const { appSession } = gameSession;
-
-        // Show welcome message
-        await appSession.layouts.showTextWall(
-            "Welcome to AR Chess!\n\nSay 'white' or 'black' to choose your color.",
-            { durationMs: 0 }
-        );
-
-        // Update dashboard
-        this.updateDashboardContent(sessionId);
-
-        // Transition to color selection mode
-        gameSession.state.mode = SessionMode.CHOOSING_COLOR;
-    }
-
-    private async handleUserInput(sessionId: string, transcript: string): Promise<void> {
-        const gameSession = this.sessionManager.getSession(sessionId);
-        if (!gameSession) return;
-
-        const { appSession, state } = gameSession;
-
-        appSession.logger.debug('Processing user input', { transcript, mode: state.mode });
-
-        switch (state.mode) {
-            case SessionMode.CHOOSING_COLOR:
-                await this.handleColorSelection(sessionId, transcript);
-                break;
-
-            case SessionMode.CHOOSING_DIFFICULTY:
-                await this.handleDifficultySelection(sessionId, transcript);
-                break;
-
-            case SessionMode.USER_TURN:
-                await this.handleUserMove(sessionId, transcript);
-                break;
-
-            case SessionMode.AWAITING_CLARIFICATION:
-                await this.handleClarification(sessionId, transcript);
-                break;
-
-            default:
-                appSession.logger.warn('Unexpected input in current mode', { mode: state.mode });
-        }
-    }
-
-    private async handleColorSelection(sessionId: string, transcript: string): Promise<void> {
-        const gameSession = this.sessionManager.getSession(sessionId);
-        if (!gameSession) return;
-
-        const { appSession } = gameSession;
-        const color = parseColorTranscript(transcript);
-
-        if (color) {
-            gameSession.state.userColor = color;
-            gameSession.state.mode = SessionMode.CHOOSING_DIFFICULTY;
-
-            await appSession.layouts.showTextWall(
-                `You chose ${color}!\n\nSay 'easy', 'medium', or 'hard' for AI difficulty.`,
-                { durationMs: 0 }
-            );
-
-            // Update dashboard
-            this.updateDashboardContent(sessionId);
-        } else {
-            await appSession.layouts.showTextWall(
-                "Please say 'white' or 'black' to choose your color.",
-                { durationMs: 3000 }
-            );
-        }
-    }
-
-    private async handleDifficultySelection(sessionId: string, transcript: string): Promise<void> {
-        const gameSession = this.sessionManager.getSession(sessionId);
-        if (!gameSession) return;
-
-        const { appSession } = gameSession;
-        const difficulty = await parseDifficultyTranscript(transcript);
-
-        if (difficulty) {
-            gameSession.state.aiDifficulty = difficulty;
-            gameSession.state.mode = SessionMode.USER_TURN;
-
-            await appSession.layouts.showTextWall(
-                `Difficulty set to ${difficulty}!\n\nGame starting...`,
-                { durationMs: 2000 }
-            );
-
-            // Update dashboard
-            this.updateDashboardContent(sessionId);
-
-            // Start the game
-            await this.startGame(sessionId);
-        } else {
-            await appSession.layouts.showTextWall(
-                "Please say 'easy', 'medium', or 'hard' for AI difficulty.",
-                { durationMs: 3000 }
-            );
-        }
-    }
-
     private async startGame(sessionId: string): Promise<void> {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
@@ -403,6 +303,28 @@ export class ChessServer extends AppServer {
 
         // Update dashboard
         this.updateDashboardContent(sessionId);
+    }
+
+    private async handleUserInput(sessionId: string, transcript: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
+        const { appSession, state } = gameSession;
+
+        appSession.logger.debug('Processing user input', { transcript, mode: state.mode });
+
+        switch (state.mode) {
+            case SessionMode.USER_TURN:
+                await this.handleUserMove(sessionId, transcript);
+                break;
+
+            case SessionMode.AWAITING_CLARIFICATION:
+                await this.handleClarification(sessionId, transcript);
+                break;
+
+            default:
+                appSession.logger.warn('Unexpected input in current mode', { mode: state.mode });
+        }
     }
 
     private async handleUserMove(sessionId: string, transcript: string): Promise<void> {
