@@ -1,3 +1,4 @@
+import { AppServerConfig } from '@mentra/sdk';
 import { ChessServer } from './server/ChessServer';
 import dotenv from 'dotenv';
 
@@ -10,25 +11,28 @@ interface ErrorWithMessage {
 }
 
 // Environment variables (loaded from .env file by dotenv.config())
-const MENTRAOS_API_KEY = process.env.MENTRAOS_API_KEY ?? '';
-const PACKAGE_NAME = process.env.PACKAGE_NAME ?? 'com.mentra.chess';
-const PORT = parseInt(process.env.PORT || '3000');
+const config: AppServerConfig = {
+    packageName: process.env.PACKAGE_NAME!,
+    apiKey: process.env.MENTRAOS_API_KEY!,
+    port: parseInt(process.env.PORT || '3000'),
+    publicDir: false
+};
 
 // Validate required environment variables
-if (!MENTRAOS_API_KEY) {
+if (!config.apiKey) {
     throw new Error('MENTRAOS_API_KEY is required. Please set it in your environment variables.');
 }
 
 console.log('Starting AR Chess Server...');
-console.log(`Package Name: ${PACKAGE_NAME}`);
-console.log(`Port: ${PORT}`);
+console.log(`Package Name: ${config.packageName}`);
+console.log(`Port: ${config.port}`);
 
 // Create and start the chess server
-const chessServer = new ChessServer();
+const chessServer = new ChessServer(config);
 
 chessServer.start()
     .then(() => {
-        console.log(`AR Chess Server started successfully on port ${PORT}`);
+        console.log(`AR Chess Server started successfully on port ${config.port}`);
         console.log('Server is ready to handle chess game sessions!');
         console.log('\nFeatures:');
         console.log('- Voice-controlled chess gameplay');
@@ -36,10 +40,10 @@ chessServer.start()
         console.log('- AI opponent with configurable difficulty');
         console.log('- Ambiguous move resolution');
         console.log('- Game state management');
-        console.log('\nHealth check available at: http://localhost:' + PORT + '/health');
+        console.log('\nHealth check available at: http://localhost:' + config.port + '/health');
     })
-    .catch((error: ErrorWithMessage) => {
-        console.error('Failed to start AR Chess Server:', error.message);
+    .catch((error) => {
+        console.error('Failed to start AR Chess Server:', error);
         process.exit(1);
     });
 

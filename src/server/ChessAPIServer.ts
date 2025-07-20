@@ -1,6 +1,7 @@
 import { ChessServer } from './ChessServer';
 import { SessionState, PlayerColor, Difficulty, SessionMode } from '../utils/types';
 import { initializeBoard, boardToFEN } from '../chess_logic';
+import { AppServerConfig } from '@mentra/sdk';
 
 interface GameStatistics {
     totalGames: number;
@@ -9,20 +10,9 @@ interface GameStatistics {
     averageGameDuration: number;
 }
 
-interface GameInfo {
-    sessionId: string;
-    userId: string;
-    state: SessionState;
-    createdAt: Date;
-    lastActivity: Date;
-}
-
 export class ChessAPIServer extends ChessServer {
-    private gameHistory: Map<string, GameInfo> = new Map();
-    private gameStartTimes: Map<string, Date> = new Map();
-
-    constructor() {
-        super();
+    constructor(config: AppServerConfig) {
+        super(config);
         this.setupAPIRoutes();
     }
 
@@ -46,16 +36,17 @@ export class ChessAPIServer extends ChessServer {
 
         // Get all active games
         expressApp.get('/api/games', (req: any, res: any) => {
-            const activeGames = Array.from(this.gameHistory.values())
-                .filter(game => game.state.mode !== SessionMode.GAME_OVER)
-                .map(game => ({
-                    sessionId: game.sessionId,
-                    userId: game.userId,
-                    mode: game.state.mode,
-                    userColor: game.state.userColor,
-                    currentPlayer: game.state.currentPlayer,
-                    createdAt: game.createdAt,
-                    lastActivity: game.lastActivity
+            const activeGames = this.sessionManager.getAllSessionIds()
+                .map(sessionId => this.sessionManager.getSessionInfo(sessionId))
+                .filter(info => info && info.state.mode !== SessionMode.GAME_OVER)
+                .map(info => ({
+                    sessionId: info!.sessionId,
+                    userId: info!.userId,
+                    mode: info!.state.mode,
+                    userColor: info!.state.userColor,
+                    currentPlayer: info!.state.currentPlayer,
+                    createdAt: info!.createdAt,
+                    lastActivity: info!.lastActivity
                 }));
 
             res.json({
@@ -68,17 +59,17 @@ export class ChessAPIServer extends ChessServer {
         expressApp.get('/api/games/:sessionId', (req: any, res: any) => {
             const { sessionId } = req.params;
             const gameState = this.getSessionState(sessionId);
+            const gameInfo = this.sessionManager.getSessionInfo(sessionId);
 
-            if (!gameState) {
+            if (!gameState || !gameInfo) {
                 return res.status(404).json({ error: 'Game not found' });
             }
 
-            const gameInfo = this.gameHistory.get(sessionId);
             res.json({
                 sessionId,
                 state: gameState,
-                createdAt: gameInfo?.createdAt,
-                lastActivity: gameInfo?.lastActivity
+                createdAt: gameInfo.createdAt,
+                lastActivity: gameInfo.lastActivity
             });
         });
 
@@ -120,16 +111,8 @@ export class ChessAPIServer extends ChessServer {
                 lastActivityTime: new Date()
             };
 
-            const gameInfo: GameInfo = {
-                sessionId,
-                userId,
-                state: initialState,
-                createdAt: new Date(),
-                lastActivity: new Date()
-            };
-
-            this.gameHistory.set(sessionId, gameInfo);
-            this.gameStartTimes.set(sessionId, new Date());
+            // TODO: Provide a real AppSession if available. Using null as a placeholder for now.
+            this.sessionManager.initializeSession(sessionId, initialState, userId, null as any);
 
             res.status(201).json({
                 sessionId,
@@ -198,19 +181,18 @@ export class ChessAPIServer extends ChessServer {
     }
 
     private calculateStatistics(): GameStatistics {
-        const totalGames = this.gameHistory.size;
-        const activeGames = Array.from(this.gameHistory.values())
-            .filter(game => game.state.mode !== SessionMode.GAME_OVER).length;
+        const allInfos = this.sessionManager.getAllSessionIds().map(id => this.sessionManager.getSessionInfo(id)).filter(Boolean);
+        const totalGames = allInfos.length;
+        const activeGames = allInfos.filter(info => info!.state.mode !== SessionMode.GAME_OVER).length;
         const gamesCompleted = totalGames - activeGames;
 
         // Calculate average game duration
         let totalDuration = 0;
         let completedGamesCount = 0;
 
-        this.gameStartTimes.forEach((startTime, sessionId) => {
-            const gameInfo = this.gameHistory.get(sessionId);
-            if (gameInfo && gameInfo.state.mode === SessionMode.GAME_OVER) {
-                const duration = gameInfo.lastActivity.getTime() - startTime.getTime();
+        allInfos.forEach(info => {
+            if (info!.state.mode === SessionMode.GAME_OVER && info!.createdAt && info!.lastActivity) {
+                const duration = (info!.lastActivity.getTime() - info!.createdAt.getTime());
                 totalDuration += duration;
                 completedGamesCount++;
             }
@@ -228,43 +210,10 @@ export class ChessAPIServer extends ChessServer {
         };
     }
 
-    // Override onSession to track game history
-    protected async onSession(session: any, sessionId: string, userId: string): Promise<void> {
-        // Call parent implementation
-        await super.onSession(session, sessionId, userId);
-
-        // Track game in history
-        const gameState = this.getSessionState(sessionId);
-        if (gameState) {
-            const gameInfo: GameInfo = {
-                sessionId,
-                userId,
-                state: gameState,
-                createdAt: new Date(),
-                lastActivity: new Date()
-            };
-
-            this.gameHistory.set(sessionId, gameInfo);
-            this.gameStartTimes.set(sessionId, new Date());
-        }
-    }
-
-    // Override onStop to update game history
-    protected async onStop(sessionId: string, userId: string, reason: string): Promise<void> {
-        // Update last activity
-        const gameInfo = this.gameHistory.get(sessionId);
-        if (gameInfo) {
-            gameInfo.lastActivity = new Date();
-            gameInfo.state = this.getSessionState(sessionId) || gameInfo.state;
-        }
-
-        // Call parent implementation
-        await super.onStop(sessionId, userId, reason);
-    }
-
+    // No need to override onSession/onStop for game history
     // Public method to get game history
-    public getGameHistory(): GameInfo[] {
-        return Array.from(this.gameHistory.values());
+    public getGameHistory() {
+        return this.sessionManager.getAllSessionIds().map(id => this.sessionManager.getSessionInfo(id));
     }
 
     // Public method to get specific game info
@@ -273,7 +222,7 @@ export class ChessAPIServer extends ChessServer {
         // For now, return a mock Express app or null
         return null;
     }
-    public getGameInfo(sessionId: string): GameInfo | undefined {
-        return this.gameHistory.get(sessionId);
+    public getGameInfo(sessionId: string) {
+        return this.sessionManager.getSessionInfo(sessionId);
     }
 } 

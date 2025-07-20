@@ -73,7 +73,7 @@ A robust, real-time chess server designed specifically for Augmented Reality (AR
    # Create .env file
    PACKAGE_NAME=com.mentra.chess
    MENTRAOS_API_KEY=your_api_key_here
-   PORT=3000
+     PORT=3000
    ```
 
 4. **Start the server**

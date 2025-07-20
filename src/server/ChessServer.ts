@@ -1,4 +1,4 @@
-import { TpaServer, TpaSession, ViewType, StreamType, DashboardMode } from '@mentra/sdk';
+import { AppServer, AppSession, AppServerConfig, ViewType, StreamType, DashboardMode } from '@mentra/sdk';
 import { 
     SessionState, 
     SessionMode, 
@@ -30,30 +30,16 @@ import {
 } from '../chess_logic';
 import { StockfishService } from '../services/StockfishService';
 import { stockfishMoveToInternal } from '../utils/stockfishUtils';
+import { SessionManager, ChessSessionInfo } from '../session/SessionManager';
 
-interface GameSession {
-    sessionId: string;
-    userId: string;
-    appSession: TpaSession;
-    state: SessionState;
-    cleanupFunctions: Array<() => void>;
-    dashboardCleanup?: () => void;
-}
-
-export class ChessServer extends TpaServer {
-    private gameSessions: Map<string, GameSession> = new Map();
+export class ChessServer extends AppServer {
+    protected sessionManager: SessionManager;
     private readonly CLARIFICATION_TIMEOUT = 30000; // 30 seconds
     private readonly AI_MOVE_DELAY = 2000; // 2 seconds for AI "thinking"
     private stockfishService: StockfishService;
 
-    constructor() {
-        super({
-            packageName: process.env.PACKAGE_NAME ?? 'com.mentra.chess',
-            apiKey: process.env.MENTRAOS_API_KEY ?? '',
-            port: parseInt(process.env.PORT || '3000'),
-            healthCheck: true,
-            publicDir: false
-        });
+    constructor(config: AppServerConfig) {
+        super(config);
         
         // Initialize Stockfish service
         console.log('Initializing Stockfish service in ChessServer...');
@@ -69,9 +55,10 @@ export class ChessServer extends TpaServer {
             console.log('Continuing with simple AI fallback...');
             this.stockfishService = null as any;
         }
+        this.sessionManager = new SessionManager();
     }
 
-    protected async onSession(session: TpaSession, sessionId: string, userId: string): Promise<void> {
+    protected async onSession(session: AppSession, sessionId: string, userId: string): Promise<void> {
         this.logger.info('New chess session started', { sessionId, userId });
 
         // Initialize game state
@@ -97,79 +84,55 @@ export class ChessServer extends TpaServer {
         };
 
         // Create game session
-        const gameSession: GameSession = {
-            sessionId,
-            userId,
-            appSession: session,
-            state: initialState,
-            cleanupFunctions: []
-        };
-
-        this.gameSessions.set(sessionId, gameSession);
+        this.sessionManager.initializeSession(sessionId, initialState, userId, session);
 
         // Set up event handlers
-        this.setupEventHandlers(gameSession);
+        this.setupEventHandlers(sessionId);
 
         // Set up dashboard integration
-        this.setupDashboardIntegration(gameSession);
+        this.setupDashboardIntegration(sessionId);
 
         // Start the game flow
-        await this.startGameFlow(gameSession);
+        await this.startGameFlow(sessionId);
     }
 
     protected async onStop(sessionId: string, userId: string, reason: string): Promise<void> {
         this.logger.info('Chess session stopped', { sessionId, userId, reason });
 
-        const gameSession = this.gameSessions.get(sessionId);
-        if (gameSession) {
-            // Clean up event handlers
-            gameSession.cleanupFunctions.forEach(cleanup => cleanup());
-            
-            // Clean up dashboard
-            if (gameSession.dashboardCleanup) {
-                gameSession.dashboardCleanup();
-            }
-            
-            // Clear any pending timeouts
-            if (gameSession.state.timeoutId) {
-                clearTimeout(gameSession.state.timeoutId);
-            }
-
-            this.gameSessions.delete(sessionId);
-        }
+        this.sessionManager.removeSession(sessionId);
     }
 
-    private setupEventHandlers(gameSession: GameSession): void {
-        const { appSession, state } = gameSession;
+    private setupEventHandlers(sessionId: string): void {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
 
-        // Subscribe to transcription events
-        appSession.subscribe(StreamType.TRANSCRIPTION);
+        const { appSession, state } = gameSession;
 
         // Handle transcription events
         const transcriptionHandler = (data: any) => {
             if (data.isFinal) {
-                this.handleUserInput(gameSession, data.text);
+                this.handleUserInput(sessionId, data.text);
             }
         };
 
         // Handle button presses for navigation
         const buttonHandler = (data: any) => {
-            this.handleButtonPress(gameSession, data);
+            this.handleButtonPress(sessionId, data);
         };
 
         // Handle head position for UI context
         const headPositionHandler = (data: any) => {
-            this.handleHeadPosition(gameSession, data);
+            this.handleHeadPosition(sessionId, data);
         };
 
         // Handle voice activity detection
         const voiceActivityHandler = (data: any) => {
-            this.handleVoiceActivity(gameSession, data);
+            this.handleVoiceActivity(sessionId, data);
         };
 
         // Handle glasses battery updates
         const batteryHandler = (data: any) => {
-            this.handleBatteryUpdate(gameSession, data);
+            this.handleBatteryUpdate(sessionId, data);
         };
 
         // Store cleanup functions
@@ -182,22 +145,28 @@ export class ChessServer extends TpaServer {
         );
     }
 
-    private setupDashboardIntegration(gameSession: GameSession): void {
+    private setupDashboardIntegration(sessionId: string): void {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession } = gameSession;
 
         // Set up dashboard mode change handler
         const dashboardModeHandler = (mode: DashboardMode | 'none') => {
-            this.handleDashboardModeChange(gameSession, mode);
+            this.handleDashboardModeChange(sessionId, mode);
         };
 
         // Store dashboard cleanup function
         gameSession.dashboardCleanup = appSession.dashboard.content.onModeChange(dashboardModeHandler);
 
         // Initial dashboard update
-        this.updateDashboardContent(gameSession);
+        this.updateDashboardContent(sessionId);
     }
 
-    private async handleDashboardModeChange(gameSession: GameSession, mode: DashboardMode | 'none'): Promise<void> {
+    private async handleDashboardModeChange(sessionId: string, mode: DashboardMode | 'none'): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession, state } = gameSession;
 
         appSession.logger.debug('Dashboard mode changed', { mode });
@@ -208,10 +177,13 @@ export class ChessServer extends TpaServer {
         }
 
         // Update dashboard content based on new mode
-        this.updateDashboardContent(gameSession);
+        this.updateDashboardContent(sessionId);
     }
 
-    private updateDashboardContent(gameSession: GameSession): void {
+    private updateDashboardContent(sessionId: string): void {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession, state } = gameSession;
 
         // Get user preferences from settings
@@ -289,7 +261,10 @@ export class ChessServer extends TpaServer {
         }
     }
 
-    private async startGameFlow(gameSession: GameSession): Promise<void> {
+    private async startGameFlow(sessionId: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession } = gameSession;
 
         // Show welcome message
@@ -299,32 +274,35 @@ export class ChessServer extends TpaServer {
         );
 
         // Update dashboard
-        this.updateDashboardContent(gameSession);
+        this.updateDashboardContent(sessionId);
 
         // Transition to color selection mode
         gameSession.state.mode = SessionMode.CHOOSING_COLOR;
     }
 
-    private async handleUserInput(gameSession: GameSession, transcript: string): Promise<void> {
+    private async handleUserInput(sessionId: string, transcript: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession, state } = gameSession;
 
         appSession.logger.debug('Processing user input', { transcript, mode: state.mode });
 
         switch (state.mode) {
             case SessionMode.CHOOSING_COLOR:
-                await this.handleColorSelection(gameSession, transcript);
+                await this.handleColorSelection(sessionId, transcript);
                 break;
 
             case SessionMode.CHOOSING_DIFFICULTY:
-                await this.handleDifficultySelection(gameSession, transcript);
+                await this.handleDifficultySelection(sessionId, transcript);
                 break;
 
             case SessionMode.USER_TURN:
-                await this.handleUserMove(gameSession, transcript);
+                await this.handleUserMove(sessionId, transcript);
                 break;
 
             case SessionMode.AWAITING_CLARIFICATION:
-                await this.handleClarification(gameSession, transcript);
+                await this.handleClarification(sessionId, transcript);
                 break;
 
             default:
@@ -332,7 +310,10 @@ export class ChessServer extends TpaServer {
         }
     }
 
-    private async handleColorSelection(gameSession: GameSession, transcript: string): Promise<void> {
+    private async handleColorSelection(sessionId: string, transcript: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession } = gameSession;
         const color = parseColorTranscript(transcript);
 
@@ -346,7 +327,7 @@ export class ChessServer extends TpaServer {
             );
 
             // Update dashboard
-            this.updateDashboardContent(gameSession);
+            this.updateDashboardContent(sessionId);
         } else {
             await appSession.layouts.showTextWall(
                 "Please say 'white' or 'black' to choose your color.",
@@ -355,7 +336,10 @@ export class ChessServer extends TpaServer {
         }
     }
 
-    private async handleDifficultySelection(gameSession: GameSession, transcript: string): Promise<void> {
+    private async handleDifficultySelection(sessionId: string, transcript: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession } = gameSession;
         const difficulty = await parseDifficultyTranscript(transcript);
 
@@ -369,10 +353,10 @@ export class ChessServer extends TpaServer {
             );
 
             // Update dashboard
-            this.updateDashboardContent(gameSession);
+            this.updateDashboardContent(sessionId);
 
             // Start the game
-            await this.startGame(gameSession);
+            await this.startGame(sessionId);
         } else {
             await appSession.layouts.showTextWall(
                 "Please say 'easy', 'medium', or 'hard' for AI difficulty.",
@@ -381,25 +365,31 @@ export class ChessServer extends TpaServer {
         }
     }
 
-    private async startGame(gameSession: GameSession): Promise<void> {
+    private async startGame(sessionId: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession, state } = gameSession;
 
         // Display initial board
-        await displayBoard(appSession, gameSession.userId, state);
+        await displayBoard(appSession, gameSession.info.userId, state);
 
         // Determine first player
         if (state.userColor === PlayerColor.BLACK) {
             // AI goes first if user is black
             state.currentPlayer = PlayerColor.WHITE;
-            await this.makeAIMove(gameSession);
+            await this.makeAIMove(sessionId);
         } else {
             // User goes first if user is white
             state.currentPlayer = PlayerColor.WHITE;
-            await this.promptUserMove(gameSession);
+            await this.promptUserMove(sessionId);
         }
     }
 
-    private async promptUserMove(gameSession: GameSession): Promise<void> {
+    private async promptUserMove(sessionId: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession, state } = gameSession;
 
         const turnText = state.currentPlayer === PlayerColor.WHITE ? "White" : "Black";
@@ -412,10 +402,13 @@ export class ChessServer extends TpaServer {
         );
 
         // Update dashboard
-        this.updateDashboardContent(gameSession);
+        this.updateDashboardContent(sessionId);
     }
 
-    private async handleUserMove(gameSession: GameSession, transcript: string): Promise<void> {
+    private async handleUserMove(sessionId: string, transcript: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession, state } = gameSession;
 
         // Check if it's the user's turn
@@ -430,7 +423,7 @@ export class ChessServer extends TpaServer {
         // Check for castling command first
         const castlingSide = parseCastlingTranscript(transcript);
         if (castlingSide) {
-            await this.handleCastlingMove(gameSession, castlingSide);
+            await this.handleCastlingMove(sessionId, castlingSide);
             return;
         }
 
@@ -469,20 +462,23 @@ export class ChessServer extends TpaServer {
             // Unambiguous move
             const move = possibleMoves[0];
             if (move) {
-                await this.executeUserMove(gameSession, move, targetCoords);
+                await this.executeUserMove(sessionId, move, targetCoords);
             }
         } else {
             // Ambiguous move - need clarification
-            await this.handleAmbiguousMove(gameSession, piece as Piece, targetCoords, possibleMoves);
+            await this.handleAmbiguousMove(sessionId, piece as Piece, targetCoords, possibleMoves);
         }
     }
 
     private async handleAmbiguousMove(
-        gameSession: GameSession, 
+        sessionId: string, 
         piece: Piece, 
         targetCoords: Coordinates, 
         possibleMoves: PotentialMove[]
     ): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession, state } = gameSession;
 
         // Store clarification data
@@ -505,15 +501,18 @@ export class ChessServer extends TpaServer {
         await appSession.layouts.showTextWall(optionsText, { durationMs: 0 });
 
         // Update dashboard
-        this.updateDashboardContent(gameSession);
+        this.updateDashboardContent(sessionId);
 
         // Set timeout for clarification
         state.timeoutId = setTimeout(() => {
-            this.handleClarificationTimeout(gameSession);
+            this.handleClarificationTimeout(sessionId);
         }, this.CLARIFICATION_TIMEOUT);
     }
 
-    private async handleClarification(gameSession: GameSession, transcript: string): Promise<void> {
+    private async handleClarification(sessionId: string, transcript: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession, state } = gameSession;
 
         // Clear timeout
@@ -540,10 +539,13 @@ export class ChessServer extends TpaServer {
             return;
         }
         
-        await this.executeUserMove(gameSession, selectedMove, state.clarificationData!.targetSquare);
+        await this.executeUserMove(sessionId, selectedMove, state.clarificationData!.targetSquare);
     }
 
-    private async handleClarificationTimeout(gameSession: GameSession): Promise<void> {
+    private async handleClarificationTimeout(sessionId: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession, state } = gameSession;
 
         state.mode = SessionMode.USER_TURN;
@@ -556,10 +558,13 @@ export class ChessServer extends TpaServer {
         );
 
         // Update dashboard
-        this.updateDashboardContent(gameSession);
+        this.updateDashboardContent(sessionId);
     }
 
-    private async handleCastlingMove(gameSession: GameSession, side: 'kingside' | 'queenside'): Promise<void> {
+    private async handleCastlingMove(sessionId: string, side: 'kingside' | 'queenside'): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession, state } = gameSession;
 
         // Validate castling
@@ -611,26 +616,29 @@ export class ChessServer extends TpaServer {
         });
 
         // Display updated board
-        await displayBoard(appSession, gameSession.userId, state);
+        await displayBoard(appSession, gameSession.info.userId, state);
 
         // Update dashboard
-        this.updateDashboardContent(gameSession);
+        this.updateDashboardContent(sessionId);
 
         // Check for game over
         const gameEnd = checkGameEnd(state.board, state.currentPlayer);
         if (gameEnd.isOver) {
             const message = gameEnd.reason === 'checkmate' ? 'Checkmate!' : 
                            gameEnd.reason === 'stalemate' ? 'Stalemate!' : 'Game Over!';
-            await this.handleGameOver(gameSession, message, gameEnd.result);
+            await this.handleGameOver(sessionId, message, gameEnd.result);
             return;
         }
 
         // Switch to AI turn
         state.mode = SessionMode.AI_TURN;
-        await this.makeAIMove(gameSession);
+        await this.makeAIMove(sessionId);
     }
 
-    private async executeUserMove(gameSession: GameSession, move: PotentialMove, targetCoords: Coordinates): Promise<void> {
+    private async executeUserMove(sessionId: string, move: PotentialMove, targetCoords: Coordinates): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession, state } = gameSession;
 
         // Validate the move before executing
@@ -672,26 +680,29 @@ export class ChessServer extends TpaServer {
         state.isCheck = validation.isCheck || false;
 
         // Display updated board
-        await displayBoard(appSession, gameSession.userId, state);
+        await displayBoard(appSession, gameSession.info.userId, state);
 
         // Update dashboard
-        this.updateDashboardContent(gameSession);
+        this.updateDashboardContent(sessionId);
 
         // Check for game over
         const gameEnd = checkGameEnd(state.board, state.currentPlayer);
         if (gameEnd.isOver) {
             const message = gameEnd.reason === 'checkmate' ? 'Checkmate!' : 
                            gameEnd.reason === 'stalemate' ? 'Stalemate!' : 'Game Over!';
-            await this.handleGameOver(gameSession, message, gameEnd.result);
+            await this.handleGameOver(sessionId, message, gameEnd.result);
             return;
         }
 
         // Switch to AI turn
         state.mode = SessionMode.AI_TURN;
-        await this.makeAIMove(gameSession);
+        await this.makeAIMove(sessionId);
     }
 
-    private async makeAIMove(gameSession: GameSession): Promise<void> {
+    private async makeAIMove(sessionId: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession, state } = gameSession;
 
         // Show thinking indicator
@@ -755,34 +766,34 @@ export class ChessServer extends TpaServer {
                 );
 
                 // Display updated board
-                await displayBoard(appSession, gameSession.userId, state);
+                await displayBoard(appSession, gameSession.info.userId, state);
 
                 // Update dashboard
-                this.updateDashboardContent(gameSession);
+                this.updateDashboardContent(sessionId);
 
                 // Check for game over
                 const gameEnd = checkGameEnd(state.board, state.currentPlayer);
                 if (gameEnd.isOver) {
                     const message = gameEnd.reason === 'checkmate' ? 'Checkmate!' : 
                                    gameEnd.reason === 'stalemate' ? 'Stalemate!' : 'Game Over!';
-                    await this.handleGameOver(gameSession, message, gameEnd.result);
+                    await this.handleGameOver(sessionId, message, gameEnd.result);
                     return;
                 }
 
                 // Switch to user turn
                 state.mode = SessionMode.USER_TURN;
-                await this.promptUserMove(gameSession);
+                await this.promptUserMove(sessionId);
             } else {
                 // No valid move found
                 await appSession.layouts.showTextWall("AI couldn't find a valid move", { durationMs: 2000 });
                 state.mode = SessionMode.USER_TURN;
-                await this.promptUserMove(gameSession);
+                await this.promptUserMove(sessionId);
             }
         } catch (error) {
             console.error('Error in AI move:', error);
             await appSession.layouts.showTextWall("AI move failed, your turn", { durationMs: 2000 });
             state.mode = SessionMode.USER_TURN;
-            await this.promptUserMove(gameSession);
+            await this.promptUserMove(sessionId);
         }
     }
 
@@ -832,7 +843,10 @@ export class ChessServer extends TpaServer {
         return null;
     }
 
-    private async handleGameOver(gameSession: GameSession, message: string, result?: 'white_win' | 'black_win' | 'draw'): Promise<void> {
+    private async handleGameOver(sessionId: string, message: string, result?: 'white_win' | 'black_win' | 'draw'): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession, state } = gameSession;
 
         state.mode = SessionMode.GAME_OVER;
@@ -845,16 +859,19 @@ export class ChessServer extends TpaServer {
         );
 
         // Update dashboard
-        this.updateDashboardContent(gameSession);
+        this.updateDashboardContent(sessionId);
     }
 
-    private async handleButtonPress(gameSession: GameSession, data: any): Promise<void> {
+    private async handleButtonPress(sessionId: string, data: any): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession } = gameSession;
         
         // Handle hardware button presses for navigation
         if (data.buttonId === 'primary' && data.pressType === 'press') {
             // Primary button could be used for board refresh or help
-            await displayBoard(appSession, gameSession.userId, gameSession.state);
+            await displayBoard(appSession, gameSession.info.userId, gameSession.state);
         } else if (data.buttonId === 'secondary' && data.pressType === 'long') {
             // Long press on secondary button could show help
             await appSession.layouts.showReferenceCard(
@@ -864,17 +881,22 @@ export class ChessServer extends TpaServer {
         }
     }
 
-    private async handleHeadPosition(gameSession: GameSession, data: any): Promise<void> {
+    private async handleHeadPosition(sessionId: string, data: any): Promise<void> {
         // Handle head position changes for UI context
         // Could be used to show different information based on where user is looking
         if (data.position === 'up') {
             // User looking up - dashboard is already handled by dashboard mode change
-            const { appSession } = gameSession;
+            const session = this.sessionManager.getSession(sessionId);
+            if (!session) return;
+            const { appSession } = session;
             appSession.logger.debug('User looked up - dashboard should be visible');
         }
     }
 
-    private async handleVoiceActivity(gameSession: GameSession, data: any): Promise<void> {
+    private async handleVoiceActivity(sessionId: string, data: any): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession } = gameSession;
         const isSpeaking = data.status === true || data.status === "true";
 
@@ -887,7 +909,10 @@ export class ChessServer extends TpaServer {
         }
     }
 
-    private async handleBatteryUpdate(gameSession: GameSession, data: any): Promise<void> {
+    private async handleBatteryUpdate(sessionId: string, data: any): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
         const { appSession } = gameSession;
         
         // Log battery status
@@ -904,12 +929,11 @@ export class ChessServer extends TpaServer {
 
     // Public methods for external access
     public getActiveSessionsCount(): number {
-        return this.gameSessions.size;
+        return this.sessionManager.getActiveSessionsCount();
     }
 
     public getSessionState(sessionId: string): SessionState | null {
-        const gameSession = this.gameSessions.get(sessionId);
-        return gameSession ? gameSession.state : null;
+        return this.sessionManager.getState(sessionId) || null;
     }
 
     public async start(): Promise<void> {
@@ -919,9 +943,7 @@ export class ChessServer extends TpaServer {
 
     public async stop(): Promise<void> {
         // Clean up all active sessions
-        for (const [sessionId, gameSession] of this.gameSessions) {
-            await this.onStop(sessionId, gameSession.userId, 'server shutdown');
-        }
+        this.sessionManager.stopAllSessions();
         
         // Stop Stockfish service
         if (this.stockfishService) {
