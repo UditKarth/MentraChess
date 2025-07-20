@@ -1,24 +1,46 @@
 {
-  "name": "mentraos-cloud-example-app",
+  "name": "ar-chess-server",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "Augmented Reality Chess Server for MentraOS Smart Glasses",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "bun src/index.ts",
-    "dev": "bun --hot src/index.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "clean": "rm -rf dist",
+    "prebuild": "npm run clean"
   },
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "chess",
+    "ar",
+    "augmented-reality",
+    "mentraos",
+    "smart-glasses",
+    "voice-control"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
   "dependencies": {
-    "@mentra/sdk": "^2.0.3",
-    "express": "^4.21.2",
-    "ws": "^8.18.1"
+    "@mentra/sdk": "^1.0.0",
+    "dotenv": "^17.2.0",
+    "express": "^4.18.2"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
-    "@types/express": "^5.0.1",
-    "@types/node": "^22.13.14",
-    "@types/ws": "^8.18.0"
+    "@types/dotenv": "^8.2.3",
+    "@types/express": "^4.17.17",
+    "@types/jest": "^29.0.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "eslint": "^8.57.1",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

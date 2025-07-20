@@ -1,0 +1,180 @@
+{
+  "name": "AR Chess",
+  "description": "Voice-controlled chess game for Augmented Reality smart glasses with AI opponent and real-time AR display.",
+  "settings": [
+    {
+      "type": "group",
+      "title": "Dashboard Settings"
+    },
+    {
+      "key": "compact_dashboard",
+      "type": "toggle",
+      "label": "Compact Dashboard Mode",
+      "defaultValue": false,
+      "description": "Show only essential information in the dashboard"
+    },
+    {
+      "key": "show_captured_pieces",
+      "type": "toggle",
+      "label": "Show Captured Pieces",
+      "defaultValue": true,
+      "description": "Display captured pieces in the dashboard"
+    },
+    {
+      "key": "show_move_history",
+      "type": "toggle",
+      "label": "Show Move History",
+      "defaultValue": false,
+      "description": "Display recent moves in expanded dashboard"
+    },
+    {
+      "type": "group",
+      "title": "Game Settings"
+    },
+    {
+      "key": "default_difficulty",
+      "type": "select",
+      "label": "Default AI Difficulty",
+      "defaultValue": "medium",
+      "options": [
+        { "label": "Easy", "value": "easy" },
+        { "label": "Medium", "value": "medium" },
+        { "label": "Hard", "value": "hard" }
+      ],
+      "description": "Default difficulty level for new games"
+    },
+    {
+      "key": "auto_promote_to_queen",
+      "type": "toggle",
+      "label": "Auto-Promote to Queen",
+      "defaultValue": true,
+      "description": "Automatically promote pawns to queens"
+    },
+    {
+      "key": "show_legal_moves",
+      "type": "toggle",
+      "label": "Show Legal Moves",
+      "defaultValue": false,
+      "description": "Display legal moves for selected pieces"
+    },
+    {
+      "type": "group",
+      "title": "Display Settings"
+    },
+    {
+      "key": "board_orientation",
+      "type": "select",
+      "label": "Board Orientation",
+      "defaultValue": "auto",
+      "options": [
+        { "label": "Auto (Based on Color)", "value": "auto" },
+        { "label": "White at Bottom", "value": "white_bottom" },
+        { "label": "Black at Bottom", "value": "black_bottom" }
+      ],
+      "description": "How the chess board is oriented in AR view"
+    },
+    {
+      "key": "show_coordinates",
+      "type": "toggle",
+      "label": "Show Board Coordinates",
+      "defaultValue": true,
+      "description": "Display file and rank labels on the board"
+    },
+    {
+      "key": "highlight_last_move",
+      "type": "toggle",
+      "label": "Highlight Last Move",
+      "defaultValue": true,
+      "description": "Highlight the squares of the last move made"
+    },
+    {
+      "type": "group",
+      "title": "Voice Settings"
+    },
+    {
+      "key": "voice_feedback",
+      "type": "toggle",
+      "label": "Voice Feedback",
+      "defaultValue": true,
+      "description": "Provide voice confirmation for moves"
+    },
+    {
+      "key": "move_announcements",
+      "type": "toggle",
+      "label": "Move Announcements",
+      "defaultValue": true,
+      "description": "Announce AI moves verbally"
+    },
+    {
+      "key": "confirmation_timeout",
+      "type": "slider",
+      "label": "Move Confirmation Timeout",
+      "min": 10,
+      "max": 60,
+      "defaultValue": 30,
+      "description": "Seconds to wait for move confirmation"
+    },
+    {
+      "type": "group",
+      "title": "Notifications"
+    },
+    {
+      "key": "low_battery_alert",
+      "type": "toggle",
+      "label": "Low Battery Alerts",
+      "defaultValue": true,
+      "description": "Show alerts when battery is low"
+    },
+    {
+      "key": "game_completion_notification",
+      "type": "toggle",
+      "label": "Game Completion Notifications",
+      "defaultValue": true,
+      "description": "Notify when games are completed"
+    },
+    {
+      "key": "connection_status",
+      "type": "toggle",
+      "label": "Connection Status",
+      "defaultValue": false,
+      "description": "Show connection status in dashboard"
+    },
+    {
+      "type": "group",
+      "title": "Advanced Settings"
+    },
+    {
+      "key": "debug_mode",
+      "type": "toggle",
+      "label": "Debug Mode",
+      "defaultValue": false,
+      "description": "Enable debug logging and additional information"
+    },
+    {
+      "key": "ai_thinking_time",
+      "type": "slider",
+      "label": "AI Thinking Time",
+      "min": 1,
+      "max": 10,
+      "defaultValue": 2,
+      "description": "Seconds for AI to 'think' before making a move"
+    },
+    {
+      "key": "auto_save_games",
+      "type": "toggle",
+      "label": "Auto-Save Games",
+      "defaultValue": false,
+      "description": "Automatically save game state (when implemented)"
+    },
+    {
+      "type": "titleValue",
+      "label": "App Version",
+      "value": "1.0.0"
+    },
+    {
+      "type": "titleValue",
+      "label": "Supported Features",
+      "value": "Voice Control, AI Opponent, AR Display, Dashboard Integration"
+    }
+  ]
+} 

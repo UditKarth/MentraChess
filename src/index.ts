@@ -1,44 +1,57 @@
-import { AppServer, AppSession, ViewType } from '@mentra/sdk';
+import { ChessServer } from './server/ChessServer';
+import dotenv from 'dotenv';
 
+// Load environment variables from .env file
+dotenv.config();
 
-const PACKAGE_NAME = process.env.PACKAGE_NAME ?? (() => { throw new Error('PACKAGE_NAME is not set in .env file'); })();
-const MENTRAOS_API_KEY = process.env.MENTRAOS_API_KEY ?? (() => { throw new Error('MENTRAOS_API_KEY is not set in .env file'); })();
-const PORT = parseInt(process.env.PORT || '3000');
-
-class ExampleMentraOSApp extends AppServer {
-
-  constructor() {
-    super({
-      packageName: PACKAGE_NAME,
-      apiKey: MENTRAOS_API_KEY,
-      port: PORT,
-    });
-  }
-
-  protected async onSession(session: AppSession, sessionId: string, userId: string): Promise<void> {
-    // Show welcome message
-    session.layouts.showTextWall("Example App is ready!");
-
-    // Handle real-time transcription
-    // requires microphone permission to be set in the developer console
-    session.events.onTranscription((data) => {
-      if (data.isFinal) {
-        session.layouts.showTextWall("You said: " + data.text, {
-          view: ViewType.MAIN,
-          durationMs: 3000
-        });
-      }
-    })
-
-    session.events.onGlassesBattery((data) => {
-      console.log('Glasses battery:', data);
-    })
-  }
+// Add proper error handling types
+interface ErrorWithMessage {
+    message: string;
 }
 
-// Start the server
-// DEV CONSOLE URL: https://console.mentra.glass/
-// Get your webhook URL from ngrok (or whatever public URL you have)
-const app = new ExampleMentraOSApp();
+// Environment variables (loaded from .env file by dotenv.config())
+const MENTRAOS_API_KEY = process.env.MENTRAOS_API_KEY ?? '';
+const PACKAGE_NAME = process.env.PACKAGE_NAME ?? 'com.mentra.chess';
+const PORT = parseInt(process.env.PORT || '3000');
 
-app.start().catch(console.error);
+// Validate required environment variables
+if (!MENTRAOS_API_KEY) {
+    throw new Error('MENTRAOS_API_KEY is required. Please set it in your environment variables.');
+}
+
+console.log('Starting AR Chess Server...');
+console.log(`Package Name: ${PACKAGE_NAME}`);
+console.log(`Port: ${PORT}`);
+
+// Create and start the chess server
+const chessServer = new ChessServer();
+
+chessServer.start()
+    .then(() => {
+        console.log(`AR Chess Server started successfully on port ${PORT}`);
+        console.log('Server is ready to handle chess game sessions!');
+        console.log('\nFeatures:');
+        console.log('- Voice-controlled chess gameplay');
+        console.log('- Real-time AR display updates');
+        console.log('- AI opponent with configurable difficulty');
+        console.log('- Ambiguous move resolution');
+        console.log('- Game state management');
+        console.log('\nHealth check available at: http://localhost:' + PORT + '/health');
+    })
+    .catch((error: ErrorWithMessage) => {
+        console.error('Failed to start AR Chess Server:', error.message);
+        process.exit(1);
+    });
+
+// Graceful shutdown handling
+process.on('SIGINT', () => {
+    console.log('\nShutting down AR Chess Server...');
+    chessServer.stop();
+    process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+    console.log('\nShutting down AR Chess Server...');
+    chessServer.stop();
+    process.exit(0);
+});
