@@ -164,7 +164,11 @@ export async function parseDifficultyTranscript(transcript: string): Promise<imp
  * @returns The selected number (1-based index) or null.
  */
 export function parseClarificationTranscript(transcript: string): number | null {
-    const lower = transcript.toLowerCase().trim().replace(/^(number|option)\s*/, ''); // Remove prefixes
+    // Clean up transcript: lowercase, trim, remove common prefixes and non-alphanumerics except digits
+    let lower = transcript.toLowerCase().trim().replace(/^(number|option)\s*/, '');
+    lower = lower.replace(/[^a-z0-9 ]/g, '');
+    lower = lower.replace(/\s+/g, ' ');
+    // Map common misrecognitions
     const numberMap: { [key: string]: number } = {
         'one': 1, '1': 1,
         'two': 2, '2': 2, 'to': 2, 'too': 2,
@@ -174,12 +178,18 @@ export function parseClarificationTranscript(transcript: string): number | null 
         'six': 6, '6': 6,
         'seven': 7, '7': 7,
         'eight': 8, '8': 8,
-        // Add more if needed, though unlikely for chess ambiguity
+        'nine': 9, '9': 9,
+        'ten': 10, '10': 10
     };
-    const numberValue = numberMap[lower];
-    if (numberValue !== undefined) return numberValue;
-    const parsedInt = parseInt(lower, 10);
-    if (!isNaN(parsedInt) && parsedInt > 0) return parsedInt; // Ensure it's positive
+    if (numberMap[lower] !== undefined) return numberMap[lower]!;
+    // Try to extract a number from the string
+    const match = lower.match(/\d+/);
+    if (match) {
+        const parsedInt = parseInt(match[0], 10);
+        if (!isNaN(parsedInt) && parsedInt > 0) return parsedInt;
+    }
+    // Debug log
+    // console.log('parseClarificationTranscript: could not parse', transcript, '->', lower);
     return null;
 }
 

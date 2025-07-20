@@ -31,6 +31,7 @@ import {
 import { StockfishService } from '../services/StockfishService';
 import { stockfishMoveToInternal } from '../utils/stockfishUtils';
 import { SessionManager, ChessSessionInfo } from '../session/SessionManager';
+import { parseChessMove } from '../utils/chessMoveParser';
 
 export class ChessServer extends AppServer {
     protected sessionManager: SessionManager;
@@ -342,14 +343,22 @@ export class ChessServer extends AppServer {
             return;
         }
 
-        const moveData = parseMoveTranscript(transcript);
+        // Use parseChessMove for robust parsing (captures, promotions, etc.)
+        let moveData = parseChessMove(transcript);
+        if (!moveData) {
+            // Fallback to parseMoveTranscript for simple cases
+            const fallback = parseMoveTranscript(transcript);
+            if (fallback) {
+                moveData = { piece: fallback.piece, to: fallback.target };
+            }
+        }
         if (!moveData) {
             await this.updateBoardAndFeedback(sessionId, "Please specify a piece and square (e.g., 'rook to d4' or 'pawn e5') or say 'kingside' or 'queenside' to castle.");
             return;
         }
 
-        const { piece, target } = moveData;
-        const targetCoords = algebraicToCoords(target);
+        const { piece, to } = moveData;
+        const targetCoords = algebraicToCoords(to.toLowerCase());
 
         if (!targetCoords) {
             await this.updateBoardAndFeedback(sessionId, "Invalid square. Please use standard chess notation (e.g., 'e4', 'd5').");
@@ -361,7 +370,7 @@ export class ChessServer extends AppServer {
         const possibleMoves = findPossibleMoves(state.board, state.userColor, pieceChar as Piece, targetCoords);
 
         if (possibleMoves.length === 0) {
-            await this.updateBoardAndFeedback(sessionId, `No ${piece} can move to ${target}. Please try a different move.`);
+            await this.updateBoardAndFeedback(sessionId, `No ${piece} can move to ${to}. Please try a different move.`);
             return;
         }
 
@@ -601,108 +610,122 @@ export class ChessServer extends AppServer {
         if (!gameSession) return;
 
         const { state } = gameSession;
-
-        // Show thinking indicator
         await this.updateBoardAndFeedback(sessionId, "AI is thinking...");
 
-        try {
-            let aiMove: { source: Coordinates; target: Coordinates; piece: Piece } | null = null;
+        // Determine AI color (opposite of user)
+        const aiColor = state.userColor === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
+        const maxRetries = 3;
+        let aiMove: { source: Coordinates; target: Coordinates; piece: Piece } | null = null;
+        let validMoveFound = false;
+        let attempt = 0;
+        let usedStockfish = false;
+        let originalCurrentPlayer = state.currentPlayer;
 
-            // Try to use Stockfish if available
-            if (this.stockfishService && this.stockfishService.isEngineReady()) {
+        // --- Try Stockfish up to maxRetries ---
+        if (this.stockfishService && this.stockfishService.isEngineReady()) {
+            usedStockfish = true;
+            while (attempt < maxRetries && !validMoveFound) {
+                attempt++;
                 try {
+                    // Temporarily set currentPlayer to AI for FEN
+                    state.currentPlayer = aiColor;
                     const stockfishMove = await this.stockfishService.getBestMove(
-                        state, 
+                        state,
                         state.aiDifficulty || Difficulty.MEDIUM,
-                        3000 // 3 second time limit
+                        3000
                     );
-                    
+                    state.currentPlayer = originalCurrentPlayer; // Restore
+
                     if (stockfishMove) {
                         const internalMove = stockfishMoveToInternal(stockfishMove, state.board);
                         if (internalMove) {
-                            aiMove = {
-                                source: internalMove.source,
-                                target: internalMove.target,
-                                piece: internalMove.piece
-                            };
+                            // Validate move
+                            const validation = validateMove(state.board, internalMove.source, internalMove.target, aiColor, state.castlingRights);
+                            if (validation.isValid) {
+                                aiMove = {
+                                    source: internalMove.source,
+                                    target: internalMove.target,
+                                    piece: internalMove.piece
+                                };
+                                validMoveFound = true;
+                                break;
+                            } else {
+                                console.warn(`Stockfish suggested invalid move (attempt ${attempt}): ${internalMove.piece} from ${coordsToAlgebraic(internalMove.source)} to ${coordsToAlgebraic(internalMove.target)}: ${validation.error}`);
+                            }
                         }
                     }
-                } catch (stockfishError) {
-                    console.warn('Stockfish move failed, falling back to simple AI:', stockfishError);
+                } catch (err) {
+                    console.warn('Stockfish move failed:', err);
                 }
             }
+        }
 
-            // Fallback to simple AI if Stockfish is not available or fails
-            if (!aiMove) {
-                aiMove = this.generateSimpleAIMove(state);
-            }
-            
-            if (aiMove) {
-                // Validate the move before executing
-                const aiColor = state.userColor === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
-                const validation = validateMove(state.board, aiMove.source, aiMove.target, aiColor, state.castlingRights);
-                if (!validation.isValid) {
-                    console.warn(`AI attempted invalid move: ${aiMove.piece} from ${coordsToAlgebraic(aiMove.source)} to ${coordsToAlgebraic(aiMove.target)}: ${validation.error}`);
-                    await this.updateBoardAndFeedback(sessionId, `AI attempted invalid move: ${validation.error}`);
-                    // Switch to user turn
-                    state.mode = SessionMode.USER_TURN;
-                    await this.promptUserMove(sessionId);
-                    return;
-                }
-
-                const { updatedBoard, capturedPiece } = executeMove(state.board, aiMove.source, aiMove.target);
-                state.board = updatedBoard;
-
-                // Update captured pieces
-                if (capturedPiece !== ' ') {
-                    if (state.userColor === PlayerColor.BLACK) {
-                        state.capturedByWhite.push(capturedPiece);
+        // --- Fallback to simple AI if needed ---
+        if (!validMoveFound) {
+            attempt = 0;
+            while (attempt < maxRetries && !validMoveFound) {
+                attempt++;
+                const simpleMove = this.generateSimpleAIMove(state, aiColor);
+                if (simpleMove) {
+                    const validation = validateMove(state.board, simpleMove.source, simpleMove.target, aiColor, state.castlingRights);
+                    if (validation.isValid) {
+                        aiMove = simpleMove;
+                        validMoveFound = true;
+                        break;
                     } else {
-                        state.capturedByBlack.push(capturedPiece);
+                        console.warn(`Simple AI suggested invalid move (attempt ${attempt}): ${simpleMove.piece} from ${coordsToAlgebraic(simpleMove.source)} to ${coordsToAlgebraic(simpleMove.target)}: ${validation.error}`);
                     }
                 }
-
-                // Update game state
-                state.currentPlayer = state.currentPlayer === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
-                state.currentFEN = boardToFEN(state);
-
-                // Display AI move
-                const sourceSquare = coordsToAlgebraic(aiMove.source);
-                const targetSquare = coordsToAlgebraic(aiMove.target);
-                await this.updateBoardAndFeedback(sessionId, `AI moved ${aiMove.piece} from ${sourceSquare} to ${targetSquare}`);
-                this.updateDashboardContent(sessionId);
-
-                // Check for game over
-                const gameEnd = checkGameEnd(state.board, state.currentPlayer);
-                if (gameEnd.isOver) {
-                    const message = gameEnd.reason === 'checkmate' ? 'Checkmate!' : 
-                                   gameEnd.reason === 'stalemate' ? 'Stalemate!' : 'Game Over!';
-                    await this.handleGameOver(sessionId, message, gameEnd.result);
-                    return;
-                }
-
-                // Switch to user turn
-                state.mode = SessionMode.USER_TURN;
-                await this.promptUserMove(sessionId);
-            } else {
-                // No valid move found
-                await this.updateBoardAndFeedback(sessionId, "AI couldn't find a valid move");
-                state.mode = SessionMode.USER_TURN;
-                await this.promptUserMove(sessionId);
             }
-        } catch (error) {
-            console.error('Error in AI move:', error);
-            await this.updateBoardAndFeedback(sessionId, "AI move failed, your turn");
+        }
+
+        // --- If no valid move found, inform user and switch turn ---
+        if (!validMoveFound || !aiMove) {
+            await this.updateBoardAndFeedback(sessionId, usedStockfish ? "AI couldn't find a valid move (Stockfish and fallback failed)" : "AI couldn't find a valid move");
             state.mode = SessionMode.USER_TURN;
             await this.promptUserMove(sessionId);
+            return;
         }
+
+        // --- Execute the valid AI move ---
+        const { updatedBoard, capturedPiece } = executeMove(state.board, aiMove.source, aiMove.target);
+        state.board = updatedBoard;
+
+        // Update captured pieces
+        if (capturedPiece !== ' ') {
+            if (aiColor === PlayerColor.BLACK) {
+                state.capturedByWhite.push(capturedPiece);
+            } else {
+                state.capturedByBlack.push(capturedPiece);
+            }
+        }
+
+        // Update game state
+        state.currentPlayer = state.currentPlayer === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
+        state.currentFEN = boardToFEN(state);
+
+        // Display AI move
+        const sourceSquare = coordsToAlgebraic(aiMove.source);
+        const targetSquare = coordsToAlgebraic(aiMove.target);
+        await this.updateBoardAndFeedback(sessionId, `AI moved ${aiMove.piece} from ${sourceSquare} to ${targetSquare}`);
+        this.updateDashboardContent(sessionId);
+
+        // Check for game over
+        const gameEnd = checkGameEnd(state.board, state.currentPlayer);
+        if (gameEnd.isOver) {
+            const message = gameEnd.reason === 'checkmate' ? 'Checkmate!' : 
+                           gameEnd.reason === 'stalemate' ? 'Stalemate!' : 'Game Over!';
+            await this.handleGameOver(sessionId, message, gameEnd.result);
+            return;
+        }
+
+        // Switch to user turn
+        state.mode = SessionMode.USER_TURN;
+        await this.promptUserMove(sessionId);
     }
 
-    private generateSimpleAIMove(state: SessionState): { source: Coordinates; target: Coordinates; piece: Piece } | null {
-        // Placeholder for simple AI move generation
-        // In a real implementation, this would integrate with Stockfish or similar engine
-        const aiColor = state.userColor === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
-        
+    // Update generateSimpleAIMove to accept aiColor
+    private generateSimpleAIMove(state: SessionState, aiColor: PlayerColor): { source: Coordinates; target: Coordinates; piece: Piece } | null {
         // Find all AI pieces
         const aiPieces: Array<{ coords: Coordinates; piece: Piece }> = [];
         for (let r = 0; r < 8; r++) {
@@ -716,31 +739,17 @@ export class ChessServer extends AppServer {
             }
         }
 
-        // Simple random move generation (very basic)
-        if (aiPieces.length > 0) {
-            const randomPiece = aiPieces[Math.floor(Math.random() * aiPieces.length)];
-            if (!randomPiece) return null;
-            
-            const [r, c] = randomPiece.coords;
-            
-            // Try to move to a random adjacent square
-            const directions = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [-1, 1], [1, -1], [1, 1]];
-            for (const direction of directions) {
-                const [dr, dc] = direction;
-                if (dr !== undefined && dc !== undefined) {
-                    const newR = r + dr;
-                    const newC = c + dc;
-                    if (newR >= 0 && newR < 8 && newC >= 0 && newC < 8) {
-                        return {
-                            source: [r, c],
-                            target: [newR, newC],
-                            piece: randomPiece.piece
-                        };
+        // Try all possible moves for each piece, return the first valid one
+        for (const { coords, piece } of aiPieces) {
+            for (let tr = 0; tr < 8; tr++) {
+                for (let tc = 0; tc < 8; tc++) {
+                    const validation = validateMove(state.board, coords, [tr, tc], aiColor, state.castlingRights);
+                    if (validation.isValid) {
+                        return { source: coords, target: [tr, tc], piece };
                     }
                 }
             }
         }
-
         return null;
     }
 
