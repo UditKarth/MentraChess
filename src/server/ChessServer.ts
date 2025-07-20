@@ -22,11 +22,11 @@ import {
     executeMove,
     executeCastling,
     updateCastlingRights,
-    displayBoard,
     boardToFEN,
     validateMove,
     checkGameEnd,
-    getLegalMoves
+    getLegalMoves,
+    renderBoardString
 } from '../chess_logic';
 import { StockfishService } from '../services/StockfishService';
 import { stockfishMoveToInternal } from '../utils/stockfishUtils';
@@ -265,22 +265,27 @@ export class ChessServer extends AppServer {
         }
     }
 
+    // Helper to update board and feedback using DoubleTextWall
+    private async updateBoardAndFeedback(sessionId: string, feedback: string) {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+        const { appSession, state } = gameSession;
+        const boardText = renderBoardString(state);
+        await appSession.layouts.showDoubleTextWall(boardText, feedback, { durationMs: -1 });
+    }
+
     private async startGame(sessionId: string): Promise<void> {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
 
-        const { appSession, state } = gameSession;
-
-        // Display initial board
-        await displayBoard(appSession, gameSession.info.userId, state);
+        const { state } = gameSession;
+        await this.updateBoardAndFeedback(sessionId, 'Game started!');
 
         // Determine first player
         if (state.userColor === PlayerColor.BLACK) {
-            // AI goes first if user is black
             state.currentPlayer = PlayerColor.WHITE;
             await this.makeAIMove(sessionId);
         } else {
-            // User goes first if user is white
             state.currentPlayer = PlayerColor.WHITE;
             await this.promptUserMove(sessionId);
         }
@@ -289,19 +294,10 @@ export class ChessServer extends AppServer {
     private async promptUserMove(sessionId: string): Promise<void> {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
-
-        const { appSession, state } = gameSession;
-
-        const turnText = state.currentPlayer === PlayerColor.WHITE ? "White" : "Black";
-        const pieceText = state.userColor === state.currentPlayer ? "Your turn" : "AI thinking...";
-
-        await appSession.layouts.showDoubleTextWall(
-            `${turnText}'s Turn`,
-            pieceText,
-            { durationMs: 0 }
-        );
-
-        // Update dashboard
+        const { state } = gameSession;
+        const turnText = state.currentPlayer === PlayerColor.WHITE ? "White's Turn" : "Black's Turn";
+        const feedback = state.userColor === state.currentPlayer ? "Your turn!" : "AI thinking...";
+        await this.updateBoardAndFeedback(sessionId, `${turnText}\n${feedback}`);
         this.updateDashboardContent(sessionId);
     }
 
@@ -331,14 +327,11 @@ export class ChessServer extends AppServer {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
 
-        const { appSession, state } = gameSession;
+        const { state } = gameSession;
 
         // Check if it's the user's turn
         if (state.currentPlayer !== state.userColor) {
-            await appSession.layouts.showTextWall(
-                "Please wait for the AI to make its move.",
-                { durationMs: 2000 }
-            );
+            await this.updateBoardAndFeedback(sessionId, "Please wait for the AI to make its move.");
             return;
         }
 
@@ -351,10 +344,7 @@ export class ChessServer extends AppServer {
 
         const moveData = parseMoveTranscript(transcript);
         if (!moveData) {
-            await appSession.layouts.showTextWall(
-                "Please specify a piece and square (e.g., 'rook to d4' or 'pawn e5') or say 'kingside' or 'queenside' to castle.",
-                { durationMs: 3000 }
-            );
+            await this.updateBoardAndFeedback(sessionId, "Please specify a piece and square (e.g., 'rook to d4' or 'pawn e5') or say 'kingside' or 'queenside' to castle.");
             return;
         }
 
@@ -362,21 +352,16 @@ export class ChessServer extends AppServer {
         const targetCoords = algebraicToCoords(target);
 
         if (!targetCoords) {
-            await appSession.layouts.showTextWall(
-                "Invalid square. Please use standard chess notation (e.g., 'e4', 'd5').",
-                { durationMs: 3000 }
-            );
+            await this.updateBoardAndFeedback(sessionId, "Invalid square. Please use standard chess notation (e.g., 'e4', 'd5').");
             return;
         }
 
-        // Find possible moves for this piece
-        const possibleMoves = findPossibleMoves(state.board, state.userColor, piece as Piece, targetCoords);
+        // Normalize piece character case to match board representation
+        const pieceChar = (state.userColor === PlayerColor.WHITE) ? piece.toUpperCase() : piece.toLowerCase();
+        const possibleMoves = findPossibleMoves(state.board, state.userColor, pieceChar as Piece, targetCoords);
 
         if (possibleMoves.length === 0) {
-            await appSession.layouts.showTextWall(
-                `No ${piece} can move to ${target}. Please try a different move.`,
-                { durationMs: 3000 }
-            );
+            await this.updateBoardAndFeedback(sessionId, `No ${piece} can move to ${target}. Please try a different move.`);
             return;
         }
 
@@ -401,7 +386,7 @@ export class ChessServer extends AppServer {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
 
-        const { appSession, state } = gameSession;
+        const { state } = gameSession;
 
         // Store clarification data
         state.clarificationData = {
@@ -419,10 +404,7 @@ export class ChessServer extends AppServer {
             optionsText += `${index + 1}. ${piece} from ${sourceSquare}\n`;
         });
         optionsText += "\nSay the number to choose.";
-
-        await appSession.layouts.showTextWall(optionsText, { durationMs: 0 });
-
-        // Update dashboard
+        await this.updateBoardAndFeedback(sessionId, optionsText);
         this.updateDashboardContent(sessionId);
 
         // Set timeout for clarification
@@ -538,9 +520,7 @@ export class ChessServer extends AppServer {
         });
 
         // Display updated board
-        await displayBoard(appSession, gameSession.info.userId, state);
-
-        // Update dashboard
+        await this.updateBoardAndFeedback(sessionId, 'Move made!');
         this.updateDashboardContent(sessionId);
 
         // Check for game over
@@ -561,15 +541,12 @@ export class ChessServer extends AppServer {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
 
-        const { appSession, state } = gameSession;
+        const { state } = gameSession;
 
         // Validate the move before executing
         const validation = validateMove(state.board, move.source, targetCoords, state.userColor, state.castlingRights);
         if (!validation.isValid) {
-            await appSession.layouts.showTextWall(
-                `Invalid move: ${validation.error}`,
-                { durationMs: 3000 }
-            );
+            await this.updateBoardAndFeedback(sessionId, `Invalid move: ${validation.error}`);
             return;
         }
 
@@ -602,9 +579,7 @@ export class ChessServer extends AppServer {
         state.isCheck = validation.isCheck || false;
 
         // Display updated board
-        await displayBoard(appSession, gameSession.info.userId, state);
-
-        // Update dashboard
+        await this.updateBoardAndFeedback(sessionId, 'Move made!');
         this.updateDashboardContent(sessionId);
 
         // Check for game over
@@ -625,10 +600,10 @@ export class ChessServer extends AppServer {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
 
-        const { appSession, state } = gameSession;
+        const { state } = gameSession;
 
         // Show thinking indicator
-        await appSession.layouts.showTextWall("AI is thinking...", { durationMs: 0 });
+        await this.updateBoardAndFeedback(sessionId, "AI is thinking...");
 
         try {
             let aiMove: { source: Coordinates; target: Coordinates; piece: Piece } | null = null;
@@ -663,6 +638,18 @@ export class ChessServer extends AppServer {
             }
             
             if (aiMove) {
+                // Validate the move before executing
+                const aiColor = state.userColor === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
+                const validation = validateMove(state.board, aiMove.source, aiMove.target, aiColor, state.castlingRights);
+                if (!validation.isValid) {
+                    console.warn(`AI attempted invalid move: ${aiMove.piece} from ${coordsToAlgebraic(aiMove.source)} to ${coordsToAlgebraic(aiMove.target)}: ${validation.error}`);
+                    await this.updateBoardAndFeedback(sessionId, `AI attempted invalid move: ${validation.error}`);
+                    // Switch to user turn
+                    state.mode = SessionMode.USER_TURN;
+                    await this.promptUserMove(sessionId);
+                    return;
+                }
+
                 const { updatedBoard, capturedPiece } = executeMove(state.board, aiMove.source, aiMove.target);
                 state.board = updatedBoard;
 
@@ -682,15 +669,7 @@ export class ChessServer extends AppServer {
                 // Display AI move
                 const sourceSquare = coordsToAlgebraic(aiMove.source);
                 const targetSquare = coordsToAlgebraic(aiMove.target);
-                await appSession.layouts.showTextWall(
-                    `AI moved ${aiMove.piece} from ${sourceSquare} to ${targetSquare}`,
-                    { durationMs: 2000 }
-                );
-
-                // Display updated board
-                await displayBoard(appSession, gameSession.info.userId, state);
-
-                // Update dashboard
+                await this.updateBoardAndFeedback(sessionId, `AI moved ${aiMove.piece} from ${sourceSquare} to ${targetSquare}`);
                 this.updateDashboardContent(sessionId);
 
                 // Check for game over
@@ -707,13 +686,13 @@ export class ChessServer extends AppServer {
                 await this.promptUserMove(sessionId);
             } else {
                 // No valid move found
-                await appSession.layouts.showTextWall("AI couldn't find a valid move", { durationMs: 2000 });
+                await this.updateBoardAndFeedback(sessionId, "AI couldn't find a valid move");
                 state.mode = SessionMode.USER_TURN;
                 await this.promptUserMove(sessionId);
             }
         } catch (error) {
             console.error('Error in AI move:', error);
-            await appSession.layouts.showTextWall("AI move failed, your turn", { durationMs: 2000 });
+            await this.updateBoardAndFeedback(sessionId, "AI move failed, your turn");
             state.mode = SessionMode.USER_TURN;
             await this.promptUserMove(sessionId);
         }
@@ -769,18 +748,12 @@ export class ChessServer extends AppServer {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
 
-        const { appSession, state } = gameSession;
+        const { state } = gameSession;
 
         state.mode = SessionMode.GAME_OVER;
         state.gameResult = result;
 
-        await appSession.layouts.showDoubleTextWall(
-            "Game Over!",
-            message,
-            { durationMs: 0 }
-        );
-
-        // Update dashboard
+        await this.updateBoardAndFeedback(sessionId, `Game Over!\n${message}`);
         this.updateDashboardContent(sessionId);
     }
 
@@ -792,10 +765,8 @@ export class ChessServer extends AppServer {
         
         // Handle hardware button presses for navigation
         if (data.buttonId === 'primary' && data.pressType === 'press') {
-            // Primary button could be used for board refresh or help
-            await displayBoard(appSession, gameSession.info.userId, gameSession.state);
+            await this.updateBoardAndFeedback(sessionId, 'Board refreshed!');
         } else if (data.buttonId === 'secondary' && data.pressType === 'long') {
-            // Long press on secondary button could show help
             await appSession.layouts.showReferenceCard(
                 'Chess Help',
                 'Voice Commands:\n• "rook to d4" - Move piece\n• "white/black" - Choose color\n• "easy/medium/hard" - Set difficulty\n• "one/two/three" - Choose move'

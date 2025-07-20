@@ -1054,39 +1054,29 @@ export function parseCastlingTranscript(transcript: string): 'kingside' | 'queen
  * Generates the text representation of the board for display on glasses.
  * Handles board orientation based on user's color and settings.
  * Includes captured pieces and move history.
- * @param session - The AppSession object.
- * @param userId - The user's ID.
  * @param state - The current SessionState.
+ * @param options - Rendering options (optional overrides for board orientation, etc.)
+ * @returns The board as a string.
  */
-export async function displayBoard(session: TpaSession, userId: string, state: SessionState): Promise<void> {
-    const { board, userColor, capturedByWhite, capturedByBlack, lastMove } = state;
-    
-    // Get user settings with fallbacks
-    const boardOrientation = session.settings.get<string>('board_orientation') ?? 'auto';
-    const showCoordinates = session.settings.get<boolean>('show_coordinates') ?? true;
-    const highlightLastMove = session.settings.get<boolean>('highlight_last_move') ?? true;
-    const showCapturedPieces = session.settings.get<boolean>('show_captured_pieces') ?? true;
-    const showMoveHistory = session.settings.get<boolean>('show_move_history') ?? false;
-    
-    // Determine board orientation
-    let flipBoard = false;
-    switch (boardOrientation) {
-        case 'auto':
-            flipBoard = userColor === PlayerColor.BLACK;
-            break;
-        case 'white_bottom':
-            flipBoard = false;
-            break;
-        case 'black_bottom':
-            flipBoard = true;
-            break;
-        default:
-            flipBoard = userColor === PlayerColor.BLACK;
+export function renderBoardString(
+    state: SessionState,
+    options?: {
+        flipBoard?: boolean,
+        showCoordinates?: boolean,
+        highlightLastMove?: boolean,
+        showCapturedPieces?: boolean,
+        showMoveHistory?: boolean
     }
-    
-    let boardStr = "";
+): string {
+    const { board, userColor, capturedByWhite, capturedByBlack, lastMove } = state;
+    // Defaults (can be overridden by options)
+    const flipBoard = options?.flipBoard ?? (userColor === PlayerColor.BLACK);
+    const showCoordinates = options?.showCoordinates ?? true;
+    const highlightLastMove = options?.highlightLastMove ?? true;
+    const showCapturedPieces = options?.showCapturedPieces ?? true;
+    const showMoveHistory = options?.showMoveHistory ?? false;
 
-    // Helper to create a row separator
+    let boardStr = "";
     const rowSeparator = "  +" + "---+".repeat(BOARD_SIZE) + "\n";
 
     // 1. Captured pieces by the opponent (displayed at the top)
@@ -1094,41 +1084,36 @@ export async function displayBoard(session: TpaSession, userId: string, state: S
         const opponentCaptured = flipBoard ? capturedByWhite : capturedByBlack;
         if (opponentCaptured.length > 0) {
             boardStr += `Opponent captures: ${opponentCaptured.join(' ')}\n`;
-            boardStr += "-----------------------------------\n"; // Separator
+            boardStr += "-----------------------------------\n";
         } else {
-             boardStr += "\n\n"; // Keep spacing consistent
+            boardStr += "\n\n";
         }
     }
 
     // 2. Board ranks and pieces
     for (let r = 0; r < BOARD_SIZE; r++) {
-        const displayRow = flipBoard ? (BOARD_SIZE - 1 - r) : r; // Flip row index if user is black
-        const rankLabel = BOARD_SIZE - displayRow; // Rank number (8 down to 1)
+        const displayRow = flipBoard ? (BOARD_SIZE - 1 - r) : r;
+        const rankLabel = BOARD_SIZE - displayRow;
 
         boardStr += rowSeparator;
         if (showCoordinates) {
-            boardStr += `${rankLabel} |`; // Rank label
+            boardStr += `${rankLabel} |`;
         } else {
-            boardStr += "  |"; // No rank label
+            boardStr += "  |";
         }
 
         for (let c = 0; c < BOARD_SIZE; c++) {
-            const displayCol = c; // Columns don't flip visually in standard chess notation display
+            const displayCol = c;
             const piece = board[displayRow]?.[displayCol] ?? ' ';
-            
-            // Add highlighting for last move if enabled
             let pieceDisplay = ` ${piece} `;
             if (highlightLastMove && lastMove) {
                 const [lastFromRow, lastFromCol] = lastMove.from;
                 const [lastToRow, lastToCol] = lastMove.to;
-                
-                // Check if this square was part of the last move
                 if ((displayRow === lastFromRow && displayCol === lastFromCol) ||
                     (displayRow === lastToRow && displayCol === lastToCol)) {
-                    pieceDisplay = `[${piece}]`; // Highlight with brackets
+                    pieceDisplay = `[${piece}]`;
                 }
             }
-            
             boardStr += pieceDisplay + "|";
         }
         boardStr += "\n";
@@ -1137,28 +1122,27 @@ export async function displayBoard(session: TpaSession, userId: string, state: S
     // 3. Bottom row separator and file labels
     boardStr += rowSeparator;
     if (showCoordinates) {
-        boardStr += "  "; // Align with rank numbers
+        boardStr += "  ";
         for (let c = 0; c < BOARD_SIZE; c++) {
-            const displayCol = c;
-            boardStr += `  ${FILES[displayCol]} `;
+            boardStr += `  ${FILES[c]} `;
         }
         boardStr += "\n";
     }
 
     // 4. Captured pieces by the user (displayed at the bottom)
     if (showCapturedPieces) {
-         const userCaptured = flipBoard ? capturedByBlack : capturedByWhite;
+        const userCaptured = flipBoard ? capturedByBlack : capturedByWhite;
         if (userCaptured.length > 0) {
-             boardStr += "-----------------------------------\n"; // Separator
+            boardStr += "-----------------------------------\n";
             boardStr += `Your captures: ${userCaptured.join(' ')}\n`;
         } else {
-             boardStr += "\n\n"; // Keep spacing consistent
+            boardStr += "\n\n";
         }
     }
 
     // 5. Move history (if enabled and in expanded dashboard mode)
     if (showMoveHistory && state.moveHistory.length > 0) {
-        const recentMoves = state.moveHistory.slice(-6); // Show last 6 moves
+        const recentMoves = state.moveHistory.slice(-6);
         boardStr += "-----------------------------------\n";
         boardStr += "Recent moves:\n";
         recentMoves.forEach((move, index) => {
@@ -1174,9 +1158,7 @@ export async function displayBoard(session: TpaSession, userId: string, state: S
             boardStr += "\n";
         }
     }
-
-    // Send to glasses
-    await session.layouts.showTextWall(boardStr.trim(), { durationMs: 0 }); // Persist until next update
+    return boardStr.trim();
 }
 
 // --- FEN Generation ---
