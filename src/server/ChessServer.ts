@@ -115,6 +115,9 @@ export class ChessServer extends AppServer {
 
         // Handle transcription events
         const transcriptionHandler = (data: any) => {
+            if (data.text) {
+                this.showLiveTranscription(sessionId, data.text);
+            }
             if (data.isFinal) {
                 this.handleUserInput(sessionId, data.text);
             }
@@ -275,6 +278,15 @@ export class ChessServer extends AppServer {
         await appSession.layouts.showDoubleTextWall(boardText, feedback, { durationMs: -1 });
     }
 
+    // Helper to show live transcription as caption
+    private async showLiveTranscription(sessionId: string, transcript: string) {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+        const { appSession, state } = gameSession;
+        const boardText = renderBoardString(state);
+        await appSession.layouts.showDoubleTextWall(boardText, transcript, { durationMs: -1 });
+    }
+
     private async startGame(sessionId: string): Promise<void> {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
@@ -357,7 +369,7 @@ export class ChessServer extends AppServer {
             return;
         }
 
-        const { piece, to } = moveData;
+        const { piece, to, isCapture } = moveData;
         const targetCoords = algebraicToCoords(to.toLowerCase());
 
         if (!targetCoords) {
@@ -369,6 +381,40 @@ export class ChessServer extends AppServer {
         const pieceChar = (state.userColor === PlayerColor.WHITE) ? piece.toUpperCase() : piece.toLowerCase();
         const possibleMoves = findPossibleMoves(state.board, state.userColor, pieceChar as Piece, targetCoords);
 
+        // --- Enhanced capture handling ---
+        if (isCapture) {
+            const [targetRow, targetCol] = targetCoords;
+            const targetPiece = state.board[targetRow]?.[targetCol];
+            if (!targetPiece || targetPiece === ' ') {
+                await this.updateBoardAndFeedback(sessionId, `There is no piece to capture on ${to}.`);
+                return;
+            }
+            // Find moves that would capture at this square
+            if (possibleMoves.length === 0) {
+                await this.updateBoardAndFeedback(sessionId, `No ${piece} can capture on ${to}.`);
+                return;
+            }
+            // Try to validate each possible move
+            let validMove: PotentialMove | null = null;
+            let validationError: string | null = null;
+            for (const move of possibleMoves) {
+                const validation = validateMove(state.board, move.source, targetCoords, state.userColor, state.castlingRights);
+                if (validation.isValid) {
+                    validMove = move;
+                    break;
+                } else {
+                    validationError = validation.error ?? '';
+                }
+            }
+            if (!validMove) {
+                await this.updateBoardAndFeedback(sessionId, validationError ? `Cannot capture on ${to}: ${validationError}` : `Cannot capture on ${to}.`);
+                return;
+            }
+            await this.executeUserMove(sessionId, validMove, targetCoords);
+            return;
+        }
+
+        // --- Existing logic for non-capture moves ---
         if (possibleMoves.length === 0) {
             await this.updateBoardAndFeedback(sessionId, `No ${piece} can move to ${to}. Please try a different move.`);
             return;

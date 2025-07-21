@@ -12,7 +12,9 @@ interface ChessMove {
 
 export function parseChessMove(text: string): ChessMove | null {
   // Convert to lowercase and remove extra spaces
-  const cleanText = text.toLowerCase().trim();
+  let cleanText = text.toLowerCase().trim();
+  // Fix common voice misrecognition: 'pond' -> 'pawn'
+  cleanText = cleanText.replace(/\bpond\b/g, 'pawn');
   
   // Castling patterns
   if (cleanText.match(/^(castle|castling)\s+(king|queen)side$/)) {
@@ -41,14 +43,14 @@ export function parseChessMove(text: string): ChessMove | null {
     /^(king|k)\s+(?:from\s+)?([a-h][1-8])?\s+to\s+([a-h][1-8])$/
   ];
 
-  // Capture patterns
+  // Enhanced capture patterns for all pieces
   const capturePatterns = [
-    // Knight takes pawn on B5
-    /^(knight|k)\s+takes\s+(?:pawn|p)?\s+(?:on\s+)?([a-h][1-8])$/,
-    // Bishop captures rook on C4
-    /^(bishop|b)\s+(?:takes|captures)\s+(?:rook|r)?\s+(?:on\s+)?([a-h][1-8])$/,
-    // Queen takes knight on D5
-    /^(queen|q)\s+(?:takes|captures)\s+(?:knight|k)?\s+(?:on\s+)?([a-h][1-8])$/
+    /^(pawn|p)\s+(?:takes|captures)\s+(?:on\s+)?([a-h][1-8])$/, // Pawn takes a5
+    /^(knight|k)\s+(?:takes|captures)\s+(?:on\s+)?([a-h][1-8])$/,
+    /^(bishop|b)\s+(?:takes|captures)\s+(?:on\s+)?([a-h][1-8])$/,
+    /^(rook|r)\s+(?:takes|captures)\s+(?:on\s+)?([a-h][1-8])$/,
+    /^(queen|q)\s+(?:takes|captures)\s+(?:on\s+)?([a-h][1-8])$/,
+    /^(king|k)\s+(?:takes|captures)\s+(?:on\s+)?([a-h][1-8])$/
   ];
 
   // Promotion patterns
