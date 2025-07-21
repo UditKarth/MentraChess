@@ -380,6 +380,10 @@ export class ChessServer extends AppServer {
         // Normalize piece character case to match board representation
         const pieceChar = (state.userColor === PlayerColor.WHITE) ? piece.toUpperCase() : piece.toLowerCase();
         const possibleMoves = findPossibleMoves(state.board, state.userColor, pieceChar as Piece, targetCoords);
+        // Filter to only legal moves
+        const legalMoves = possibleMoves.filter(move =>
+            validateMove(state.board, move.source, targetCoords, state.userColor, state.castlingRights).isValid
+        );
 
         // --- Enhanced capture handling ---
         if (isCapture) {
@@ -390,14 +394,14 @@ export class ChessServer extends AppServer {
                 return;
             }
             // Find moves that would capture at this square
-            if (possibleMoves.length === 0) {
+            if (legalMoves.length === 0) {
                 await this.updateBoardAndFeedback(sessionId, `No ${piece} can capture on ${to}.`);
                 return;
             }
             // Try to validate each possible move
             let validMove: PotentialMove | null = null;
             let validationError: string | null = null;
-            for (const move of possibleMoves) {
+            for (const move of legalMoves) {
                 const validation = validateMove(state.board, move.source, targetCoords, state.userColor, state.castlingRights);
                 if (validation.isValid) {
                     validMove = move;
@@ -415,20 +419,20 @@ export class ChessServer extends AppServer {
         }
 
         // --- Existing logic for non-capture moves ---
-        if (possibleMoves.length === 0) {
+        if (legalMoves.length === 0) {
             await this.updateBoardAndFeedback(sessionId, `No ${piece} can move to ${to}. Please try a different move.`);
             return;
         }
 
-        if (possibleMoves.length === 1) {
+        if (legalMoves.length === 1) {
             // Unambiguous move
-            const move = possibleMoves[0];
+            const move = legalMoves[0];
             if (move) {
                 await this.executeUserMove(sessionId, move, targetCoords);
             }
         } else {
             // Ambiguous move - need clarification
-            await this.handleAmbiguousMove(sessionId, piece as Piece, targetCoords, possibleMoves);
+            await this.handleAmbiguousMove(sessionId, piece as Piece, targetCoords, legalMoves);
         }
     }
 
