@@ -1,4 +1,4 @@
-# AR Chess Server for MentraOS
+# MentraChess
 
 A real-time chess server for AR smart glasses using the MentraOS SDK. Features voice-controlled chess, AR board display, and Stockfish AI—all deployable on Node.js or Bun with no system binary dependencies.
 
