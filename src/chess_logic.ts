@@ -1087,7 +1087,7 @@ export function renderBoardString(
     const showMoveHistory = options?.showMoveHistory ?? false;
 
     let boardStr = "";
-    const rowSeparator = "  +" + "---+".repeat(BOARD_SIZE) + "\n";
+    const rowSeparator = (showCoordinates ? "  +" : "+") + "--+".repeat(8) + "\n";
 
     // 1. Captured pieces by the opponent (displayed at the top)
     if (showCapturedPieces) {
@@ -1101,30 +1101,37 @@ export function renderBoardString(
     }
 
     // 2. Board ranks and pieces
-    for (let r = 0; r < BOARD_SIZE; r++) {
-        const displayRow = flipBoard ? (BOARD_SIZE - 1 - r) : r;
-        const rankLabel = BOARD_SIZE - displayRow;
+    for (let r = 0; r < 8; r++) {
+        const displayRow = flipBoard ? (7 - r) : r;
+        const rankLabel = 8 - displayRow;
 
+        // Add the row separator before each row
         boardStr += rowSeparator;
+        // Add the rank label and the first cell border
         if (showCoordinates) {
             boardStr += `${rankLabel} |`;
         } else {
-            boardStr += "  |";
+            boardStr += "|";
         }
 
-        for (let c = 0; c < BOARD_SIZE; c++) {
+        for (let c = 0; c < 8; c++) {
             const displayCol = c;
             const piece = board[displayRow]?.[displayCol] ?? ' ';
-            let pieceDisplay = ` ${piece} `;
+            let pieceDisplay;
+            if (piece === ' ') {
+                pieceDisplay = '     ';
+            } else {
+                pieceDisplay = `  ${piece} `;
+            }
             if (highlightLastMove && lastMove) {
                 const [lastFromRow, lastFromCol] = lastMove.from;
                 const [lastToRow, lastToCol] = lastMove.to;
                 if ((displayRow === lastFromRow && displayCol === lastFromCol) ||
                     (displayRow === lastToRow && displayCol === lastToCol)) {
-                    pieceDisplay = `[${piece}]`;
+                    pieceDisplay = piece === ' ' ? '[   ]' : ` [${piece}]`;
                 }
             }
-            boardStr += pieceDisplay + "|";
+            boardStr += pieceDisplay + '|';
         }
         boardStr += "\n";
     }
@@ -1133,8 +1140,8 @@ export function renderBoardString(
     boardStr += rowSeparator;
     if (showCoordinates) {
         boardStr += "  ";
-        for (let c = 0; c < BOARD_SIZE; c++) {
-            boardStr += `  ${FILES[c]} `;
+        for (let c = 0; c < 8; c++) {
+            boardStr += ` ${FILES[c]} `;
         }
         boardStr += "\n";
     }
