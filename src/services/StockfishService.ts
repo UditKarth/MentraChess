@@ -24,9 +24,8 @@ export class StockfishService {
 
     private initializeStockfish(): void {
         try {
-            // Find the path to stockfish.js in node_modules
-            const stockfishPath = require.resolve('stockfish/src/stockfish.js');
-            this.stockfish = spawn('node', [stockfishPath], { stdio: ['pipe', 'pipe', 'pipe'] });
+            // Use the actual Stockfish binary instead of WASM
+            this.stockfish = spawn('stockfish', [], { stdio: ['pipe', 'pipe', 'pipe'] });
             this.stockfish.stdout.on('data', (data: Buffer) => {
                 this.handleStockfishMessage(data.toString());
             });
@@ -42,7 +41,7 @@ export class StockfishService {
             });
             this.initializeEngine();
         } catch (error) {
-            console.error('Failed to spawn stockfish.js:', error);
+            console.error('Failed to spawn stockfish binary:', error);
             this.stockfish = null;
             this.isReady = false;
             this.isInitialized = true;

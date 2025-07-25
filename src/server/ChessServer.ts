@@ -115,11 +115,20 @@ export class ChessServer extends AppServer {
 
         // Handle transcription events
         const transcriptionHandler = (data: any) => {
-            if (data.text) {
-                this.showLiveTranscription(sessionId, data.text);
-            }
-            if (data.isFinal) {
-                this.handleUserInput(sessionId, data.text);
+            try {
+                if (data.text) {
+                    // Only show live transcription for non-final text to avoid excessive updates
+                    if (!data.isFinal) {
+                        this.showLiveTranscription(sessionId, data.text);
+                    }
+                }
+                if (data.isFinal && data.text) {
+                    this.handleUserInput(sessionId, data.text);
+                }
+            } catch (error) {
+                console.error('Error in transcription handler:', error);
+                // Try to recover by updating the board
+                this.updateBoardAndFeedback(sessionId, 'Error processing input. Please try again.');
             }
         };
 
@@ -274,8 +283,19 @@ export class ChessServer extends AppServer {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
         const { appSession, state } = gameSession;
-        const boardText = renderBoardString(state);
-        await appSession.layouts.showDoubleTextWall(boardText, feedback, { durationMs: -1 });
+        
+        try {
+            const boardText = renderBoardString(state);
+            await appSession.layouts.showDoubleTextWall(boardText, feedback);
+        } catch (error) {
+            console.error('Error updating board and feedback:', error);
+            // Fallback: try to show just the feedback
+            try {
+                await appSession.layouts.showTextWall(feedback, { durationMs: 3000 });
+            } catch (fallbackError) {
+                console.error('Fallback layout also failed:', fallbackError);
+            }
+        }
     }
 
     // Helper to show live transcription as caption
@@ -283,8 +303,14 @@ export class ChessServer extends AppServer {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
         const { appSession, state } = gameSession;
-        const boardText = renderBoardString(state);
-        await appSession.layouts.showDoubleTextWall(boardText, transcript, { durationMs: -1 });
+        
+        try {
+            const boardText = renderBoardString(state);
+            await appSession.layouts.showDoubleTextWall(boardText, transcript);
+        } catch (error) {
+            console.error('Error showing live transcription:', error);
+            // Don't show fallback for live transcription to avoid spam
+        }
     }
 
     private async startGame(sessionId: string): Promise<void> {
@@ -320,19 +346,24 @@ export class ChessServer extends AppServer {
 
         const { appSession, state } = gameSession;
 
-        appSession.logger.debug('Processing user input', { transcript, mode: state.mode });
+        try {
+            appSession.logger.debug('Processing user input', { transcript, mode: state.mode });
 
-        switch (state.mode) {
-            case SessionMode.USER_TURN:
-                await this.handleUserMove(sessionId, transcript);
-                break;
+            switch (state.mode) {
+                case SessionMode.USER_TURN:
+                    await this.handleUserMove(sessionId, transcript);
+                    break;
 
-            case SessionMode.AWAITING_CLARIFICATION:
-                await this.handleClarification(sessionId, transcript);
-                break;
+                case SessionMode.AWAITING_CLARIFICATION:
+                    await this.handleClarification(sessionId, transcript);
+                    break;
 
-            default:
-                appSession.logger.warn('Unexpected input in current mode', { mode: state.mode });
+                default:
+                    appSession.logger.warn('Unexpected input in current mode', { mode: state.mode });
+            }
+        } catch (error) {
+            console.error('Error processing user input:', error);
+            await this.updateBoardAndFeedback(sessionId, 'Error processing input. Please try again.');
         }
     }
 
@@ -342,97 +373,102 @@ export class ChessServer extends AppServer {
 
         const { state } = gameSession;
 
-        // Check if it's the user's turn
-        if (state.currentPlayer !== state.userColor) {
-            await this.updateBoardAndFeedback(sessionId, "Please wait for the AI to make its move.");
-            return;
-        }
-
-        // Check for castling command first
-        const castlingSide = parseCastlingTranscript(transcript);
-        if (castlingSide) {
-            await this.handleCastlingMove(sessionId, castlingSide);
-            return;
-        }
-
-        // Use parseChessMove for robust parsing (captures, promotions, etc.)
-        let moveData = parseChessMove(transcript);
-        if (!moveData) {
-            // Fallback to parseMoveTranscript for simple cases
-            const fallback = parseMoveTranscript(transcript);
-            if (fallback) {
-                moveData = { piece: fallback.piece, to: fallback.target };
-            }
-        }
-        if (!moveData) {
-            await this.updateBoardAndFeedback(sessionId, "Please specify a piece and square (e.g., 'rook to d4' or 'pawn e5') or say 'kingside' or 'queenside' to castle.");
-            return;
-        }
-
-        const { piece, to, isCapture } = moveData;
-        const targetCoords = algebraicToCoords(to.toLowerCase());
-
-        if (!targetCoords) {
-            await this.updateBoardAndFeedback(sessionId, "Invalid square. Please use standard chess notation (e.g., 'e4', 'd5').");
-            return;
-        }
-
-        // Normalize piece character case to match board representation
-        const pieceChar = (state.userColor === PlayerColor.WHITE) ? piece.toUpperCase() : piece.toLowerCase();
-        const possibleMoves = findPossibleMoves(state.board, state.userColor, pieceChar as Piece, targetCoords);
-        // Filter to only legal moves
-        const legalMoves = possibleMoves.filter(move =>
-            validateMove(state.board, move.source, targetCoords, state.userColor, state.castlingRights).isValid
-        );
-
-        // --- Enhanced capture handling ---
-        if (isCapture) {
-            const [targetRow, targetCol] = targetCoords;
-            const targetPiece = state.board[targetRow]?.[targetCol];
-            if (!targetPiece || targetPiece === ' ') {
-                await this.updateBoardAndFeedback(sessionId, `There is no piece to capture on ${to}.`);
+        try {
+            // Check if it's the user's turn
+            if (state.currentPlayer !== state.userColor) {
+                await this.updateBoardAndFeedback(sessionId, "Please wait for the AI to make its move.");
                 return;
             }
-            // Find moves that would capture at this square
-            if (legalMoves.length === 0) {
-                await this.updateBoardAndFeedback(sessionId, `No ${piece} can capture on ${to}.`);
+
+            // Check for castling command first
+            const castlingSide = parseCastlingTranscript(transcript);
+            if (castlingSide) {
+                await this.handleCastlingMove(sessionId, castlingSide);
                 return;
             }
-            // Try to validate each possible move
-            let validMove: PotentialMove | null = null;
-            let validationError: string | null = null;
-            for (const move of legalMoves) {
-                const validation = validateMove(state.board, move.source, targetCoords, state.userColor, state.castlingRights);
-                if (validation.isValid) {
-                    validMove = move;
-                    break;
-                } else {
-                    validationError = validation.error ?? '';
+
+            // Use parseChessMove for robust parsing (captures, promotions, etc.)
+            let moveData = parseChessMove(transcript);
+            if (!moveData) {
+                // Fallback to parseMoveTranscript for simple cases
+                const fallback = parseMoveTranscript(transcript);
+                if (fallback) {
+                    moveData = { piece: fallback.piece, to: fallback.target };
                 }
             }
-            if (!validMove) {
-                await this.updateBoardAndFeedback(sessionId, validationError ? `Cannot capture on ${to}: ${validationError}` : `Cannot capture on ${to}.`);
+            if (!moveData) {
+                await this.updateBoardAndFeedback(sessionId, "Please specify a piece and square (e.g., 'rook to d4' or 'pawn e5') or say 'kingside' or 'queenside' to castle.");
                 return;
             }
-            await this.executeUserMove(sessionId, validMove, targetCoords);
-            return;
-        }
 
-        // --- Existing logic for non-capture moves ---
-        if (legalMoves.length === 0) {
-            await this.updateBoardAndFeedback(sessionId, `No ${piece} can move to ${to}. Please try a different move.`);
-            return;
-        }
+            const { piece, to, isCapture } = moveData;
+            const targetCoords = algebraicToCoords(to.toLowerCase());
 
-        if (legalMoves.length === 1) {
-            // Unambiguous move
-            const move = legalMoves[0];
-            if (move) {
-                await this.executeUserMove(sessionId, move, targetCoords);
+            if (!targetCoords) {
+                await this.updateBoardAndFeedback(sessionId, "Invalid square. Please use standard chess notation (e.g., 'e4', 'd5').");
+                return;
             }
-        } else {
-            // Ambiguous move - need clarification
-            await this.handleAmbiguousMove(sessionId, piece as Piece, targetCoords, legalMoves);
+
+            // Normalize piece character case to match board representation
+            const pieceChar = (state.userColor === PlayerColor.WHITE) ? piece.toUpperCase() : piece.toLowerCase();
+            const possibleMoves = findPossibleMoves(state.board, state.userColor, pieceChar as Piece, targetCoords);
+            // Filter to only legal moves
+            const legalMoves = possibleMoves.filter(move =>
+                validateMove(state.board, move.source, targetCoords, state.userColor, state.castlingRights).isValid
+            );
+
+            // --- Enhanced capture handling ---
+            if (isCapture) {
+                const [targetRow, targetCol] = targetCoords;
+                const targetPiece = state.board[targetRow]?.[targetCol];
+                if (!targetPiece || targetPiece === ' ') {
+                    await this.updateBoardAndFeedback(sessionId, `There is no piece to capture on ${to}.`);
+                    return;
+                }
+                // Find moves that would capture at this square
+                if (legalMoves.length === 0) {
+                    await this.updateBoardAndFeedback(sessionId, `No ${piece} can capture on ${to}.`);
+                    return;
+                }
+                // Try to validate each possible move
+                let validMove: PotentialMove | null = null;
+                let validationError: string | null = null;
+                for (const move of legalMoves) {
+                    const validation = validateMove(state.board, move.source, targetCoords, state.userColor, state.castlingRights);
+                    if (validation.isValid) {
+                        validMove = move;
+                        break;
+                    } else {
+                        validationError = validation.error ?? '';
+                    }
+                }
+                if (!validMove) {
+                    await this.updateBoardAndFeedback(sessionId, validationError ? `Cannot capture on ${to}: ${validationError}` : `Cannot capture on ${to}.`);
+                    return;
+                }
+                await this.executeUserMove(sessionId, validMove, targetCoords);
+                return;
+            }
+
+            // --- Existing logic for non-capture moves ---
+            if (legalMoves.length === 0) {
+                await this.updateBoardAndFeedback(sessionId, `No ${piece} can move to ${to}. Please try a different move.`);
+                return;
+            }
+
+            if (legalMoves.length === 1) {
+                // Unambiguous move
+                const move = legalMoves[0];
+                if (move) {
+                    await this.executeUserMove(sessionId, move, targetCoords);
+                }
+            } else {
+                // Ambiguous move - need clarification
+                await this.handleAmbiguousMove(sessionId, piece as Piece, targetCoords, legalMoves);
+            }
+        } catch (error) {
+            console.error('Error in handleUserMove:', error);
+            await this.updateBoardAndFeedback(sessionId, 'Error processing move. Please try again.');
         }
     }
 
@@ -486,19 +522,13 @@ export class ChessServer extends AppServer {
 
         const choice = parseClarificationTranscript(transcript);
         if (!choice || choice < 1 || choice > (state.clarificationData?.possibleMoves.length || 0)) {
-            await appSession.layouts.showTextWall(
-                "Please say a valid number to choose your move.",
-                { durationMs: 3000 }
-            );
+            await this.updateBoardAndFeedback(sessionId, "Please say a valid number to choose your move.");
             return;
         }
 
         const selectedMove = state.clarificationData?.possibleMoves[choice - 1];
         if (!selectedMove) {
-            await appSession.layouts.showTextWall(
-                "Invalid move selection. Please try again.",
-                { durationMs: 3000 }
-            );
+            await this.updateBoardAndFeedback(sessionId, "Invalid move selection. Please try again.");
             return;
         }
         
@@ -515,10 +545,7 @@ export class ChessServer extends AppServer {
         state.clarificationData = undefined;
         state.timeoutId = null;
 
-        await appSession.layouts.showTextWall(
-            "Move clarification timed out. Please make your move again.",
-            { durationMs: 3000 }
-        );
+        await this.updateBoardAndFeedback(sessionId, "Move clarification timed out. Please make your move again.");
 
         // Update dashboard
         this.updateDashboardContent(sessionId);
@@ -540,10 +567,7 @@ export class ChessServer extends AppServer {
         );
 
         if (!validation.isValid) {
-            await appSession.layouts.showTextWall(
-                `Cannot castle ${side}: ${validation.error}`,
-                { durationMs: 3000 }
-            );
+            await this.updateBoardAndFeedback(sessionId, `Cannot castle ${side}: ${validation.error}`);
             return;
         }
 
@@ -824,12 +848,21 @@ export class ChessServer extends AppServer {
         
         // Handle hardware button presses for navigation
         if (data.buttonId === 'primary' && data.pressType === 'press') {
+            // Primary button: refresh board and show current state
             await this.updateBoardAndFeedback(sessionId, 'Board refreshed!');
         } else if (data.buttonId === 'secondary' && data.pressType === 'long') {
+            // Secondary button long press: show help
             await appSession.layouts.showReferenceCard(
                 'Chess Help',
-                'Voice Commands:\n• "rook to d4" - Move piece\n• "white/black" - Choose color\n• "easy/medium/hard" - Set difficulty\n• "one/two/three" - Choose move'
+                'Voice Commands:\n• "rook to d4" - Move piece\n• "pond e4" - Move pawn (pond works too!)\n• "kingside/queenside" - Castle\n• "one/two/three" - Choose move\n\nPress primary button to refresh board if stuck.'
             );
+        } else if (data.buttonId === 'secondary' && data.pressType === 'press') {
+            // Secondary button short press: show current game status
+            const { state } = gameSession;
+            const turnText = state.currentPlayer === PlayerColor.WHITE ? "White's Turn" : "Black's Turn";
+            const isUserTurn = state.currentPlayer === state.userColor;
+            const status = isUserTurn ? "Your turn!" : "AI thinking...";
+            await this.updateBoardAndFeedback(sessionId, `${turnText}\n${status}`);
         }
     }
 

@@ -92,10 +92,12 @@ export function coordsToAlgebraic(coords: Coordinates): string {
  */
 export function parseMoveTranscript(transcript: string): { piece: string; target: string } | null {
     transcript = transcript.toLowerCase().replace(/[.]/g, ''); // Remove periods
+    // Fix common voice misrecognition: 'pond' -> 'pawn'
+    transcript = transcript.replace(/\bpond\b/g, 'pawn');
 
     // More flexible regex to capture piece name and algebraic notation
     // Allows for "to", optional space, or just piece + square
-    const match = transcript.match(/(pawn|rook|knight|bishop|queen|king)\s*(?:to\s*)?([a-h][1-8])/);
+    const match = transcript.match(/(pawn|pond|rook|knight|bishop|queen|king)\s*(?:to\s*)?([a-h][1-8])/);
 
     if (match) {
         const pieceName = match[1];
