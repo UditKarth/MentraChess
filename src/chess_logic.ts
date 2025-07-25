@@ -1086,64 +1086,63 @@ export function renderBoardString(
     const showCapturedPieces = options?.showCapturedPieces ?? true;
     const showMoveHistory = options?.showMoveHistory ?? false;
 
+    // Unicode chess piece mapping
+    const unicodeMap: Record<string, string> = {
+        'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
+        'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟︎'
+    };
+    const lightSquare = '□';
+    const darkSquare = '■';
+
     let boardStr = "";
-    const rowSeparator = (showCoordinates ? "  +" : "+") + "--+".repeat(8) + "\n";
 
     // 1. Captured pieces by the opponent (displayed at the top)
     if (showCapturedPieces) {
         const opponentCaptured = flipBoard ? capturedByWhite : capturedByBlack;
         if (opponentCaptured.length > 0) {
-            boardStr += `Opponent captures: ${opponentCaptured.join(' ')}\n`;
+            boardStr += `Opponent captures: ${opponentCaptured.map(p => unicodeMap[p] || p).join(' ')}\n`;
             boardStr += "-----------------------------------\n";
         } else {
             boardStr += "\n\n";
         }
     }
 
-    // 2. Board ranks and pieces
+    // 2. Board ranks and pieces (Unicode/ASCII rendering)
     for (let r = 0; r < 8; r++) {
         const displayRow = flipBoard ? (7 - r) : r;
-        const rankLabel = 8 - displayRow;
-
-        // Add the row separator before each row
-        boardStr += rowSeparator;
-        // Add the rank label and the first cell border
-        if (showCoordinates) {
-            boardStr += `${rankLabel} |`;
-        } else {
-            boardStr += "|";
-        }
-
+        let rowStr = showCoordinates ? `${8 - displayRow} ` : '';
         for (let c = 0; c < 8; c++) {
             const displayCol = c;
             const piece = board[displayRow]?.[displayCol] ?? ' ';
-            let pieceDisplay;
+            const isLight = (displayRow + displayCol) % 2 === 0;
+            let cell = '';
             if (piece === ' ') {
-                pieceDisplay = '     ';
+                cell = isLight ? lightSquare : darkSquare;
             } else {
-                pieceDisplay = `  ${piece} `;
+                cell = unicodeMap[piece] || piece;
             }
+            // Highlight last move (optional, can be improved for Unicode)
             if (highlightLastMove && lastMove) {
                 const [lastFromRow, lastFromCol] = lastMove.from;
                 const [lastToRow, lastToCol] = lastMove.to;
                 if ((displayRow === lastFromRow && displayCol === lastFromCol) ||
                     (displayRow === lastToRow && displayCol === lastToCol)) {
-                    pieceDisplay = piece === ' ' ? '[   ]' : ` [${piece}]`;
+                    // Surround with brackets for highlight
+                    cell = `[${cell}]`;
                 }
             }
-            boardStr += pieceDisplay + '|';
+            rowStr += cell + ' ';
         }
-        boardStr += "\n";
+        boardStr += rowStr.trim() + '\n';
     }
 
-    // 3. Bottom row separator and file labels
-    boardStr += rowSeparator;
+    // 3. File labels
     if (showCoordinates) {
-        boardStr += "  ";
+        boardStr += '  ';
         for (let c = 0; c < 8; c++) {
             boardStr += ` ${FILES[c]} `;
         }
-        boardStr += "\n";
+        boardStr += '\n';
     }
 
     // 4. Captured pieces by the user (displayed at the bottom)
@@ -1151,7 +1150,7 @@ export function renderBoardString(
         const userCaptured = flipBoard ? capturedByBlack : capturedByWhite;
         if (userCaptured.length > 0) {
             boardStr += "-----------------------------------\n";
-            boardStr += `Your captures: ${userCaptured.join(' ')}\n`;
+            boardStr += `Your captures: ${userCaptured.map(p => unicodeMap[p] || p).join(' ')}\n`;
         } else {
             boardStr += "\n\n";
         }
