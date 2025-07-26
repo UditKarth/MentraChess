@@ -92,12 +92,13 @@ export function coordsToAlgebraic(coords: Coordinates): string {
  */
 export function parseMoveTranscript(transcript: string): { piece: string; target: string } | null {
     transcript = transcript.toLowerCase().replace(/[.]/g, ''); // Remove periods
-    // Fix common voice misrecognition: 'pond' -> 'pawn'
+    // Fix common voice misrecognition: 'pond' -> 'pawn', 'night' -> 'knight'
     transcript = transcript.replace(/\bpond\b/g, 'pawn');
+    transcript = transcript.replace(/\bnight\b/g, 'knight');
 
     // More flexible regex to capture piece name and algebraic notation
     // Allows for "to", optional space, or just piece + square
-    const match = transcript.match(/(pawn|pond|rook|knight|bishop|queen|king)\s*(?:to\s*)?([a-h][1-8])/);
+    const match = transcript.match(/(pawn|pond|rook|knight|night|bishop|queen|king)\s*(?:to\s*)?([a-h][1-8])/);
 
     if (match) {
         const pieceName = match[1];
@@ -119,10 +120,10 @@ export function parseMoveTranscript(transcript: string): { piece: string; target
          switch (pieceName) {
             case 'pawn': pieceChar = 'p'; break;
             case 'rook': pieceChar = 'r'; break;
-            case 'knight': pieceChar = 'k'; break; // lowercase k for knight
+            case 'knight': pieceChar = 'n'; break; // Use standard FEN 'n' for knight
             case 'bishop': pieceChar = 'b'; break;
             case 'queen': pieceChar = 'q'; break; // lowercase q for queen for parsing simplicity
-            case 'king': pieceChar = 'K'; break; // uppercase K for king
+            case 'king': pieceChar = 'k'; break; // Use standard FEN 'k' for king
         }
         // If user said queen, map to 'q', if king map to 'K' to match user request somewhat.
         // Note: findPossibleMoves will need to handle the case-sensitivity based on player color.
@@ -795,11 +796,10 @@ export function findPossibleMoves(board: Piece[][], player: PlayerColor, pieceTo
                             canPotentiallyReach = true;
                         }
                         break;
-                    case 'n': // Knight (Standard FEN 'n') - Map user's 'k' if needed
-                    case 'k': // Handle user's request 'k' for knight if pieceToFind is 'k'
-                         // Check L-shape: 2 squares in one direction, 1 in the other
+                    case 'n': // Knight (Standard FEN 'n')
+                        // Check L-shape: 2 squares in one direction, 1 in the other
                         if ((dr === 2 && dc === 1) || (dr === 1 && dc === 2)) {
-                             canPotentiallyReach = true;
+                            canPotentiallyReach = true;
                         }
                         break;
                     case 'b': // Bishop
@@ -812,10 +812,10 @@ export function findPossibleMoves(board: Piece[][], player: PlayerColor, pieceTo
                             canPotentiallyReach = true;
                         }
                         break;
-                    case 'K': // King (Standard FEN 'k') - Map user's 'K' if needed
-                         // Check adjacent squares
+                    case 'k': // King (Standard FEN 'k')
+                        // Check adjacent squares
                         if (dr <= 1 && dc <= 1) {
-                             canPotentiallyReach = true;
+                            canPotentiallyReach = true;
                         }
                         break;
                 }
@@ -1063,6 +1063,17 @@ export function parseCastlingTranscript(transcript: string): 'kingside' | 'queen
 // --- Display Functions ---
 
 /**
+ * Determines the appropriate spacing for board rendering based on piece type.
+ * @param useUnicode - Whether Unicode pieces are being used.
+ * @returns The spacing string to use between pieces.
+ */
+function getPieceSpacing(useUnicode: boolean): string {
+    // Unicode pieces are wider than Unicode squares, so we need more spacing
+    // ASCII pieces and squares are narrower, so use more spacing for alignment
+    return useUnicode ? '  ' : '  ';
+}
+
+/**
  * Generates the text representation of the board for display on glasses.
  * Handles board orientation based on user's color and settings.
  * Includes captured pieces and move history.
@@ -1077,7 +1088,8 @@ export function renderBoardString(
         showCoordinates?: boolean,
         highlightLastMove?: boolean,
         showCapturedPieces?: boolean,
-        showMoveHistory?: boolean
+        showMoveHistory?: boolean,
+        useUnicode?: boolean
     }
 ): string {
     const { board, userColor, capturedByWhite, capturedByBlack, lastMove } = state;
@@ -1087,14 +1099,21 @@ export function renderBoardString(
     const highlightLastMove = options?.highlightLastMove ?? true;
     const showCapturedPieces = options?.showCapturedPieces ?? true;
     const showMoveHistory = options?.showMoveHistory ?? false;
+    const useUnicode = options?.useUnicode ?? true;
 
     // Unicode chess piece mapping
     const unicodeMap: Record<string, string> = {
         'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
         'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟︎'
     };
-    const lightSquare = '□';
-    const darkSquare = '■';
+    
+    // Square characters based on Unicode setting
+    const lightSquare = useUnicode ? '□' : ' ';
+    const darkSquare = useUnicode ? '■' : '#';
+
+    // Get appropriate spacing based on piece type
+    const pieceSpacing = getPieceSpacing(useUnicode);
+    const squareSpacing = ' '; // Always use single space for squares
 
     let boardStr = "";
 
@@ -1121,7 +1140,7 @@ export function renderBoardString(
             if (piece === ' ') {
                 cell = isLight ? lightSquare : darkSquare;
             } else {
-                cell = unicodeMap[piece] || piece;
+                cell = useUnicode ? (unicodeMap[piece] || piece) : piece;
             }
             // Highlight last move (optional, can be improved for Unicode)
             if (highlightLastMove && lastMove) {
@@ -1133,16 +1152,20 @@ export function renderBoardString(
                     cell = `[${cell}]`;
                 }
             }
-            rowStr += cell + ' ';
+            // Use different spacing for pieces vs squares
+            const spacing = piece === ' ' ? squareSpacing : pieceSpacing;
+            rowStr += cell + spacing;
         }
-        boardStr += rowStr.trim() + '\n';
+        boardStr += rowStr.trimEnd() + '\n';
     }
 
     // 3. File labels
     if (showCoordinates) {
         boardStr += '  ';
         for (let c = 0; c < 8; c++) {
-            boardStr += ` ${FILES[c]} `;
+            // Adjust file label spacing to match piece spacing
+            const labelSpacing = useUnicode ? '  ' : '  ';
+            boardStr += `${labelSpacing}${FILES[c]}${labelSpacing}`;
         }
         boardStr += '\n';
     }

@@ -13,8 +13,9 @@ interface ChessMove {
 export function parseChessMove(text: string): ChessMove | null {
   // Convert to lowercase and remove extra spaces
   let cleanText = text.toLowerCase().trim();
-  // Fix common voice misrecognition: 'pond' -> 'pawn'
+  // Fix common voice misrecognition: 'pond' -> 'pawn', 'night' -> 'knight'
   cleanText = cleanText.replace(/\bpond\b/g, 'pawn');
+  cleanText = cleanText.replace(/\bnight\b/g, 'knight');
   
   // Castling patterns
   if (cleanText.match(/^(castle|castling)\s+(king|queen)side$/)) {
@@ -29,8 +30,8 @@ export function parseChessMove(text: string): ChessMove | null {
 
   // Basic move patterns with optional source square
   const movePatterns = [
-    // Knight from B1 to C3
-    /^(knight|k)\s+(?:from\s+)?([a-h][1-8])?\s+to\s+([a-h][1-8])$/,
+    // Knight from B1 to C3 (including night)
+    /^(knight|night|k)\s+(?:from\s+)?([a-h][1-8])?\s+to\s+([a-h][1-8])$/,
     // Pawn B6 (including pond)
     /^(pawn|pond|p)\s+([a-h][1-8])$/,
     // Bishop from C1 to E3
@@ -46,7 +47,7 @@ export function parseChessMove(text: string): ChessMove | null {
   // Enhanced capture patterns for all pieces
   const capturePatterns = [
     /^(pawn|pond|p)\s+(?:takes|captures)\s+(?:on\s+)?([a-h][1-8])$/, // Pawn takes a5
-    /^(knight|k)\s+(?:takes|captures)\s+(?:on\s+)?([a-h][1-8])$/,
+    /^(knight|night|k)\s+(?:takes|captures)\s+(?:on\s+)?([a-h][1-8])$/,
     /^(bishop|b)\s+(?:takes|captures)\s+(?:on\s+)?([a-h][1-8])$/,
     /^(rook|r)\s+(?:takes|captures)\s+(?:on\s+)?([a-h][1-8])$/,
     /^(queen|q)\s+(?:takes|captures)\s+(?:on\s+)?([a-h][1-8])$/,
@@ -56,9 +57,9 @@ export function parseChessMove(text: string): ChessMove | null {
   // Promotion patterns
   const promotionPatterns = [
     // Pawn to queen on A8
-    /^(pawn|pond|p)\s+to\s+(queen|q|rook|r|bishop|b|knight|k)\s+(?:on\s+)?([a-h][1-8])$/,
+    /^(pawn|pond|p)\s+to\s+(queen|q|rook|r|bishop|b|knight|night|k)\s+(?:on\s+)?([a-h][1-8])$/,
     
-    /^(pawn|pond|p)\s+promotes\s+to\s+(queen|q|rook|r|bishop|b|knight|k)\s+(?:on\s+)?([a-h][1-8])$/
+    /^(pawn|pond|p)\s+promotes\s+to\s+(queen|q|rook|r|bishop|b|knight|night|k)\s+(?:on\s+)?([a-h][1-8])$/
   ];
 
   // Try capture patterns first

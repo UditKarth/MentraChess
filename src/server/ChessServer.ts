@@ -284,8 +284,11 @@ export class ChessServer extends AppServer {
         if (!gameSession) return;
         const { appSession, state } = gameSession;
         
+        // Get user preferences from settings
+        const useUnicode = appSession.settings.get<boolean>('use_unicode', true);
+        
         try {
-            const boardText = renderBoardString(state);
+            const boardText = renderBoardString(state, { useUnicode });
             await appSession.layouts.showDoubleTextWall(boardText, feedback);
         } catch (error) {
             console.error('Error updating board and feedback:', error);
@@ -304,8 +307,11 @@ export class ChessServer extends AppServer {
         if (!gameSession) return;
         const { appSession, state } = gameSession;
         
+        // Get user preferences from settings
+        const useUnicode = appSession.settings.get<boolean>('use_unicode', true);
+        
         try {
-            const boardText = renderBoardString(state);
+            const boardText = renderBoardString(state, { useUnicode });
             await appSession.layouts.showDoubleTextWall(boardText, transcript);
         } catch (error) {
             console.error('Error showing live transcription:', error);
@@ -854,7 +860,7 @@ export class ChessServer extends AppServer {
             // Secondary button long press: show help
             await appSession.layouts.showReferenceCard(
                 'Chess Help',
-                'Voice Commands:\n• "rook to d4" - Move piece\n• "pond e4" - Move pawn (pond works too!)\n• "kingside/queenside" - Castle\n• "one/two/three" - Choose move\n\nPress primary button to refresh board if stuck.'
+                'Voice Commands:\n• "rook to d4" - Move piece\n• "pond e4" - Move pawn (pond works too!)\n• "night to f3" - Move knight (night works too!)\n• "kingside/queenside" - Castle\n• "one/two/three" - Choose move\n\nPress primary button to refresh board if stuck.'
             );
         } else if (data.buttonId === 'secondary' && data.pressType === 'press') {
             // Secondary button short press: show current game status

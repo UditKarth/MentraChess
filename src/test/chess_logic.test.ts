@@ -7,9 +7,10 @@ import {
     parseDifficultyTranscript,
     findPossibleMoves,
     executeMove,
-    boardToFEN
+    boardToFEN,
+    renderBoardString
 } from '../chess_logic';
-import { PlayerColor, Difficulty, Piece, SessionMode } from '../utils/types';
+import { PlayerColor, Difficulty, Piece, SessionMode, SessionState } from '../utils/types';
 
 describe('Chess Logic Tests', () => {
     describe('Board Initialization', () => {
@@ -65,10 +66,23 @@ describe('Chess Logic Tests', () => {
             const testCases = [
                 { input: 'rook to d4', expected: { piece: 'r', target: 'd4' } },
                 { input: 'pawn e5', expected: { piece: 'p', target: 'e5' } },
-                { input: 'knight f3', expected: { piece: 'k', target: 'f3' } },
+                { input: 'knight f3', expected: { piece: 'n', target: 'f3' } },
                 { input: 'bishop to c4', expected: { piece: 'b', target: 'c4' } },
                 { input: 'queen d2', expected: { piece: 'q', target: 'd2' } },
-                { input: 'king e2', expected: { piece: 'K', target: 'e2' } }
+                { input: 'king e2', expected: { piece: 'k', target: 'e2' } }
+            ];
+
+            testCases.forEach(({ input, expected }) => {
+                const result = parseMoveTranscript(input);
+                expect(result).toEqual(expected);
+            });
+        });
+
+        test('should handle voice misrecognition for piece names', () => {
+            const testCases = [
+                { input: 'pond e4', expected: { piece: 'p', target: 'e4' } },
+                { input: 'night to f3', expected: { piece: 'n', target: 'f3' } },
+                { input: 'Night e5', expected: { piece: 'n', target: 'e5' } }
             ];
 
             testCases.forEach(({ input, expected }) => {
@@ -186,6 +200,66 @@ describe('Chess Logic Tests', () => {
                 );
                 expect(e2Pawn).toBeDefined();
             }
+        });
+    });
+
+    describe('Board Rendering', () => {
+        test('should render board with correct spacing for Unicode and ASCII pieces', () => {
+            const state: SessionState = {
+                mode: SessionMode.USER_TURN,
+                userColor: PlayerColor.WHITE,
+                aiDifficulty: Difficulty.MEDIUM,
+                board: initializeBoard(),
+                capturedByWhite: [],
+                capturedByBlack: [],
+                currentPlayer: PlayerColor.WHITE,
+                currentFEN: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                castlingRights: "KQkq",
+                enPassantTarget: "-",
+                halfmoveClock: 0,
+                fullmoveNumber: 1,
+                moveHistory: [],
+                isCheck: false,
+                isCheckmate: false,
+                isStalemate: false,
+                gameStartTime: new Date(),
+                lastActivityTime: new Date()
+            };
+
+            const unicodeBoard = renderBoardString(state, { useUnicode: true });
+            const asciiBoard = renderBoardString(state, { useUnicode: false });
+
+            // Check that Unicode board uses single spaces between pieces
+            const unicodeLines = unicodeBoard.split('\n').filter(line => line.match(/^[1-8]/));
+            const asciiLines = asciiBoard.split('\n').filter(line => line.match(/^[1-8]/));
+            
+            // Find lines with pieces to compare spacing
+            const unicodePieceLines = unicodeLines.filter(line => 
+                line.includes('♔') || line.includes('♕') || line.includes('♖') || line.includes('♗') || 
+                line.includes('♚') || line.includes('♛') || line.includes('♜') || line.includes('♝') ||
+                line.includes('♟︎') || line.includes('♙')
+            );
+            
+            const asciiPieceLines = asciiLines.filter(line => 
+                line.includes('K') || line.includes('Q') || line.includes('R') || line.includes('B') || 
+                line.includes('k') || line.includes('q') || line.includes('r') || line.includes('b') ||
+                line.includes('p') || line.includes('P')
+            );
+            
+            // Verify that Unicode uses single spaces and ASCII uses double spaces
+            unicodePieceLines.forEach(line => {
+                // Check for single space between any Unicode pieces
+                expect(line).toMatch(/♔ |♕ |♖ |♗ |♘ |♙ |♚ |♛ |♜ |♝ |♞ |♟︎ /);
+            });
+            
+            asciiPieceLines.forEach(line => {
+                // Check for double spaces between ASCII pieces
+                expect(line).toMatch(/K  |Q  |R  |B  |N  |P  |k  |q  |r  |b  |n  |p  /);
+            });
+            
+            // Both should have the same number of board lines
+            expect(unicodeLines.length).toBe(asciiLines.length);
+            expect(unicodeLines.length).toBe(8);
         });
     });
 }); 
