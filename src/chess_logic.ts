@@ -1163,9 +1163,9 @@ export function renderBoardString(
     if (showCoordinates) {
         boardStr += '  ';
         for (let c = 0; c < 8; c++) {
-            // Adjust file label spacing to match piece spacing
-            const labelSpacing = useUnicode ? '  ' : '  ';
-            boardStr += `${labelSpacing}${FILES[c]}${labelSpacing}`;
+            // Use reduced spacing between file labels
+            const labelSpacing = '  '; // Two spaces between letters
+            boardStr += `${labelSpacing}${FILES[c]}`;
         }
         boardStr += '\n';
     }

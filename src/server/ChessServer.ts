@@ -39,6 +39,10 @@ export class ChessServer extends AppServer {
     private readonly AI_MOVE_DELAY = 2000; // 2 seconds for AI "thinking"
     private stockfishService: StockfishService;
 
+    // Cache for board rendering to reduce latency
+    private boardCache: Map<string, { boardText: string; timestamp: number; useUnicode: boolean }> = new Map();
+    private readonly BOARD_CACHE_DURATION = 1000; // 1 second cache duration
+
     constructor(config: AppServerConfig) {
         super(config);
         
@@ -103,6 +107,9 @@ export class ChessServer extends AppServer {
 
     protected async onStop(sessionId: string, userId: string, reason: string): Promise<void> {
         this.logger.info('Chess session stopped', { sessionId, userId, reason });
+
+        // Clean up board cache for this session
+        this.invalidateBoardCache(sessionId);
 
         this.sessionManager.removeSession(sessionId);
     }
@@ -284,11 +291,9 @@ export class ChessServer extends AppServer {
         if (!gameSession) return;
         const { appSession, state } = gameSession;
         
-        // Get user preferences from settings
-        const useUnicode = appSession.settings.get<boolean>('use_unicode', true);
-        
         try {
-            const boardText = renderBoardString(state, { useUnicode });
+            // Use cached board text for better performance
+            const boardText = this.getCachedBoardText(sessionId, state, appSession);
             await appSession.layouts.showDoubleTextWall(boardText, feedback);
         } catch (error) {
             console.error('Error updating board and feedback:', error);
@@ -307,15 +312,70 @@ export class ChessServer extends AppServer {
         if (!gameSession) return;
         const { appSession, state } = gameSession;
         
-        // Get user preferences from settings
-        const useUnicode = appSession.settings.get<boolean>('use_unicode', true);
-        
         try {
-            const boardText = renderBoardString(state, { useUnicode });
-            await appSession.layouts.showDoubleTextWall(boardText, transcript);
+            // Use cached board text to reduce latency
+            const boardText = this.getCachedBoardText(sessionId, state, appSession);
+            
+            // Use a faster display method for live transcriptions
+            // Only show the transcript as a simple overlay to minimize latency
+            await appSession.layouts.showTextWall(transcript, { 
+                durationMs: 2000
+            });
         } catch (error) {
             console.error('Error showing live transcription:', error);
             // Don't show fallback for live transcription to avoid spam
+        }
+    }
+
+    private getCachedBoardText(sessionId: string, state: SessionState, appSession: AppSession): string {
+        const now = Date.now();
+        const cacheKey = `${sessionId}_${state.currentFEN}`;
+        const cached = this.boardCache.get(cacheKey);
+        
+        // Get user preferences from settings (cache this too if needed)
+        const useUnicodeSetting = appSession.settings.get<string>('use_unicode', 'true');
+        const useUnicode = useUnicodeSetting === 'true' || useUnicodeSetting === 'TRUE' || useUnicodeSetting === '1';
+        
+        // Check if we have a valid cached version
+        if (cached && 
+            cached.useUnicode === useUnicode && 
+            (now - cached.timestamp) < this.BOARD_CACHE_DURATION) {
+            return cached.boardText;
+        }
+        
+        // Generate new board text
+        const boardText = renderBoardString(state, { useUnicode });
+        
+        // Cache the result
+        this.boardCache.set(cacheKey, {
+            boardText,
+            timestamp: now,
+            useUnicode
+        });
+        
+        // Clean up old cache entries
+        this.cleanupBoardCache();
+        
+        return boardText;
+    }
+
+    private cleanupBoardCache(): void {
+        const now = Date.now();
+        const maxAge = this.BOARD_CACHE_DURATION * 2; // Keep entries for 2x cache duration
+        
+        for (const [key, value] of this.boardCache.entries()) {
+            if ((now - value.timestamp) > maxAge) {
+                this.boardCache.delete(key);
+            }
+        }
+    }
+
+    private invalidateBoardCache(sessionId: string): void {
+        // Remove all cache entries for this session
+        for (const [key] of this.boardCache.entries()) {
+            if (key.startsWith(sessionId + '_')) {
+                this.boardCache.delete(key);
+            }
         }
     }
 
@@ -667,6 +727,9 @@ export class ChessServer extends AppServer {
         state.clarificationData = undefined;
         state.isCheck = validation.isCheck || false;
 
+        // Invalidate board cache since the board has changed
+        this.invalidateBoardCache(sessionId);
+
         // Display updated board
         await this.updateBoardAndFeedback(sessionId, 'Move made!');
         this.updateDashboardContent(sessionId);
@@ -783,6 +846,9 @@ export class ChessServer extends AppServer {
         // Update game state
         state.currentPlayer = state.currentPlayer === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
         state.currentFEN = boardToFEN(state);
+
+        // Invalidate board cache since the board has changed
+        this.invalidateBoardCache(sessionId);
 
         // Display AI move
         const sourceSquare = coordsToAlgebraic(aiMove.source);
