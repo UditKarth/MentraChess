@@ -14,8 +14,6 @@ import {
     algebraicToCoords, 
     coordsToAlgebraic,
     parseMoveTranscript,
-    parseColorTranscript,
-    parseDifficultyTranscript,
     parseClarificationTranscript,
     parseCastlingTranscript,
     findPossibleMoves,
@@ -36,7 +34,6 @@ import { parseChessMove } from '../utils/chessMoveParser';
 export class ChessServer extends AppServer {
     protected sessionManager: SessionManager;
     private readonly CLARIFICATION_TIMEOUT = 30000; // 30 seconds
-    private readonly AI_MOVE_DELAY = 2000; // 2 seconds for AI "thinking"
     private stockfishService: StockfishService;
 
     // Cache for board rendering to reduce latency
@@ -220,21 +217,6 @@ export class ChessServer extends AppServer {
         let expandedContent = '';
 
         switch (state.mode) {
-            case SessionMode.INITIALIZING:
-                mainContent = '♟️ Chess Setup';
-                expandedContent = 'Welcome to AR Chess!\n\nSay "white" or "black" to choose your color.';
-                break;
-
-            case SessionMode.CHOOSING_COLOR:
-                mainContent = '🎨 Choose Color';
-                expandedContent = 'Choose your color:\n\nSay "white" or "black"';
-                break;
-
-            case SessionMode.CHOOSING_DIFFICULTY:
-                mainContent = '⚙️ Set Difficulty';
-                expandedContent = `You chose ${state.userColor}!\n\nSay "easy", "medium", or "hard" for AI difficulty.`;
-                break;
-
             case SessionMode.USER_TURN:
             case SessionMode.AI_TURN:
                 const turnText = state.currentPlayer === PlayerColor.WHITE ? 'White' : 'Black';
@@ -271,6 +253,12 @@ export class ChessServer extends AppServer {
             case SessionMode.GAME_OVER:
                 mainContent = '🏁 Game Over';
                 expandedContent = 'Game completed!\n\nStart a new game to play again.';
+                break;
+
+            default:
+                // Fallback for any unexpected modes
+                mainContent = '♟️ Chess';
+                expandedContent = 'Chess game in progress...';
                 break;
         }
 

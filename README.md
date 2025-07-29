@@ -6,7 +6,6 @@ A real-time chess server for AR smart glasses using the MentraOS SDK. Features v
 - Voice-controlled chess moves (e.g., "rook to d4", "pawn e5")
 - AI opponent (Stockfish, configurable difficulty)
 - Real-time AR board and feedback display
-- REST API for game state, FEN, and statistics
 - Session and game state management
 
 ## Quick Start
@@ -35,13 +34,8 @@ Set these environment variables (or in a `.env` file):
 - **No system binary or WASM setup required**
 - Works on Railway, Vercel, and all Node.js hosts
 
-## API Endpoints
+## Health Check
 - `GET /health` — Server status
-- `GET /api/games` — List active games
-- `GET /api/games/:sessionId` — Game state
-- `GET /api/games/:sessionId/fen` — FEN string
-- `POST /api/games` — Create new game
-- `GET /api/statistics` — Game stats
 
 ## Project Structure
 ```
@@ -50,7 +44,6 @@ src/
   chess_logic.ts        # Chess rules & board rendering
   server/
     ChessServer.ts      # Main server logic
-    ChessAPIServer.ts   # REST API
   services/
     StockfishService.ts # Stockfish AI integration
   utils/

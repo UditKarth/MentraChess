@@ -136,30 +136,7 @@ export function parseMoveTranscript(transcript: string): { piece: string; target
 }
 
 
-/**
- * Parses transcript for color selection.
- * @param transcript - User's voice command.
- * @returns PlayerColor.WHITE, PlayerColor.BLACK, or null.
- */
-export function parseColorTranscript(transcript: string): PlayerColor | null {
-    const lower = transcript.toLowerCase().trim();
-    if (lower.includes('white') || lower.includes('light')) return PlayerColor.WHITE;
-    if (lower.includes('black') || lower.includes('dark')) return PlayerColor.BLACK;
-    return null;
-}
 
-/**
- * Parses transcript for difficulty selection.
- * @param transcript - User's voice command.
- * @returns Difficulty enum value or null.
- */
-export async function parseDifficultyTranscript(transcript: string): Promise<import('./utils/types').Difficulty | null> {
-    const lower = transcript.toLowerCase().trim();
-    if (lower.includes('easy') || lower.includes('beginner')) return (await import('./utils/types')).Difficulty.EASY;
-    if (lower.includes('medium') || lower.includes('normal') || lower.includes('intermediate')) return (await import('./utils/types')).Difficulty.MEDIUM;
-    if (lower.includes('hard') || lower.includes('advanced') || lower.includes('difficult')) return (await import('./utils/types')).Difficulty.HARD;
-    return null;
-}
 
 /**
  * Parses transcript for move clarification number.

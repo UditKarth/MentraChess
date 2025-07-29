@@ -3,8 +3,6 @@ import {
     algebraicToCoords, 
     coordsToAlgebraic,
     parseMoveTranscript,
-    parseColorTranscript,
-    parseDifficultyTranscript,
     findPossibleMoves,
     executeMove,
     boardToFEN,
@@ -98,36 +96,7 @@ describe('Chess Logic Tests', () => {
         });
     });
 
-    describe('Color Parsing', () => {
-        test('should parse color transcripts correctly', () => {
-            expect(parseColorTranscript('white')).toBe(PlayerColor.WHITE);
-            expect(parseColorTranscript('black')).toBe(PlayerColor.BLACK);
-            expect(parseColorTranscript('light')).toBe(PlayerColor.WHITE);
-            expect(parseColorTranscript('dark')).toBe(PlayerColor.BLACK);
-        });
 
-        test('should handle invalid color transcripts', () => {
-            expect(parseColorTranscript('invalid')).toBeNull();
-            expect(parseColorTranscript('')).toBeNull();
-            expect(parseColorTranscript('red')).toBeNull();
-        });
-    });
-
-    describe('Difficulty Parsing', () => {
-        test('should parse difficulty transcripts correctly', async () => {
-            expect(await parseDifficultyTranscript('easy')).toBe(Difficulty.EASY);
-            expect(await parseDifficultyTranscript('medium')).toBe(Difficulty.MEDIUM);
-            expect(await parseDifficultyTranscript('hard')).toBe(Difficulty.HARD);
-            expect(await parseDifficultyTranscript('beginner')).toBe(Difficulty.EASY);
-            expect(await parseDifficultyTranscript('advanced')).toBe(Difficulty.HARD);
-        });
-
-        test('should handle invalid difficulty transcripts', async () => {
-            expect(await parseDifficultyTranscript('invalid')).toBeNull();
-            expect(await parseDifficultyTranscript('')).toBeNull();
-            expect(await parseDifficultyTranscript('expert')).toBeNull();
-        });
-    });
 
     describe('Move Execution', () => {
         test('should execute pawn move correctly', () => {

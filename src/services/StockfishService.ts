@@ -30,8 +30,7 @@ export class StockfishService {
                 this.handleStockfishMessage(data.toString());
             });
             this.stockfish.stderr.on('data', (data: Buffer) => {
-                // Optionally log errors
-                // console.error('Stockfish stderr:', data.toString());
+                // TODO: Implement error handling
             });
             this.stockfish.on('error', (err) => {
                 console.error('Stockfish process error:', err);
@@ -87,7 +86,7 @@ export class StockfishService {
     }
 
     private handleInfo(line: string): void {
-        // Optionally parse info for analysis
+        // TODO: Implement info handling
     }
 
     private parseMove(moveString: string): StockfishMove {
