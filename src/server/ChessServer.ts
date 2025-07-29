@@ -24,7 +24,8 @@ import {
     validateMove,
     checkGameEnd,
     getLegalMoves,
-    renderBoardString
+    renderBoardString,
+    isInCheck
 } from '../chess_logic';
 import { StockfishService } from '../services/StockfishService';
 import { stockfishMoveToInternal } from '../utils/stockfishUtils';
@@ -227,8 +228,16 @@ export class ChessServer extends AppServer {
 
                 if (isUserTurn) {
                     expandedContent += 'Your move!\nSay your move (e.g., "rook to d4")';
+                    // Add check warning for user's turn
+                    if (state.isCheck) {
+                        expandedContent += '\nYou are in CHECK!';
+                    }
                 } else {
                     expandedContent += 'AI is thinking...';
+                    // Add check indication for AI's turn
+                    if (state.isCheck) {
+                        expandedContent += '\nAI is in check!';
+                    }
                 }
 
                 // Add game statistics
@@ -388,8 +397,25 @@ export class ChessServer extends AppServer {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
         const { state } = gameSession;
+        
+        // Update check status for current player
+        state.isCheck = isInCheck(state.board, state.currentPlayer);
+        
+        // Debug logging for check detection
+        if (state.isCheck) {
+            console.log(`Check detected for ${state.currentPlayer} player`);
+        }
+        
         const turnText = state.currentPlayer === PlayerColor.WHITE ? "White's Turn" : "Black's Turn";
-        const feedback = state.userColor === state.currentPlayer ? "Your turn!" : "AI thinking...";
+        let feedback = state.userColor === state.currentPlayer ? "Your turn!" : "AI thinking...";
+        
+        // Add check indication if the current player is in check
+        if (state.isCheck && state.currentPlayer === state.userColor) {
+            feedback += "\nYou are in CHECK!";
+        } else if (state.isCheck && state.currentPlayer !== state.userColor) {
+            feedback += "\nAI is in check!";
+        }
+        
         await this.updateBoardAndFeedback(sessionId, `${turnText}\n${feedback}`);
         this.updateDashboardContent(sessionId);
     }
@@ -451,7 +477,11 @@ export class ChessServer extends AppServer {
                 }
             }
             if (!moveData) {
-                await this.updateBoardAndFeedback(sessionId, "Please specify a piece and square (e.g., 'rook to d4' or 'pawn e5') or say 'kingside' or 'queenside' to castle.");
+                let errorMessage = "Please specify a piece and square (e.g., 'rook to d4' or 'pawn e5') or say 'kingside' or 'queenside' to castle.";
+                if (state.isCheck) {
+                    errorMessage += "\nYou are in CHECK! You must move to get out of check.";
+                }
+                await this.updateBoardAndFeedback(sessionId, errorMessage);
                 return;
             }
 
@@ -459,7 +489,11 @@ export class ChessServer extends AppServer {
             const targetCoords = algebraicToCoords(to.toLowerCase());
 
             if (!targetCoords) {
-                await this.updateBoardAndFeedback(sessionId, "Invalid square. Please use standard chess notation (e.g., 'e4', 'd5').");
+                let errorMessage = "Invalid square. Please use standard chess notation (e.g., 'e4', 'd5').";
+                if (state.isCheck) {
+                    errorMessage += "\nYou are in CHECK! You must move to get out of check.";
+                }
+                await this.updateBoardAndFeedback(sessionId, errorMessage);
                 return;
             }
 
@@ -476,12 +510,20 @@ export class ChessServer extends AppServer {
                 const [targetRow, targetCol] = targetCoords;
                 const targetPiece = state.board[targetRow]?.[targetCol];
                 if (!targetPiece || targetPiece === ' ') {
-                    await this.updateBoardAndFeedback(sessionId, `There is no piece to capture on ${to}.`);
+                    let errorMessage = `There is no piece to capture on ${to}.`;
+                    if (state.isCheck) {
+                        errorMessage += "\nYou are in CHECK! You must move to get out of check.";
+                    }
+                    await this.updateBoardAndFeedback(sessionId, errorMessage);
                     return;
                 }
                 // Find moves that would capture at this square
                 if (legalMoves.length === 0) {
-                    await this.updateBoardAndFeedback(sessionId, `No ${piece} can capture on ${to}.`);
+                    let errorMessage = `No ${piece} can capture on ${to}.`;
+                    if (state.isCheck) {
+                        errorMessage += "\nYou are in CHECK! You must move to get out of check.";
+                    }
+                    await this.updateBoardAndFeedback(sessionId, errorMessage);
                     return;
                 }
                 // Try to validate each possible move
@@ -497,7 +539,11 @@ export class ChessServer extends AppServer {
                     }
                 }
                 if (!validMove) {
-                    await this.updateBoardAndFeedback(sessionId, validationError ? `Cannot capture on ${to}: ${validationError}` : `Cannot capture on ${to}.`);
+                    let errorMessage = validationError ? `Cannot capture on ${to}: ${validationError}` : `Cannot capture on ${to}.`;
+                    if (state.isCheck) {
+                        errorMessage += "\nYou are in CHECK! You must move to get out of check.";
+                    }
+                    await this.updateBoardAndFeedback(sessionId, errorMessage);
                     return;
                 }
                 await this.executeUserMove(sessionId, validMove, targetCoords);
@@ -506,7 +552,13 @@ export class ChessServer extends AppServer {
 
             // --- Existing logic for non-capture moves ---
             if (legalMoves.length === 0) {
-                await this.updateBoardAndFeedback(sessionId, `No ${piece} can move to ${to}. Please try a different move.`);
+                let errorMessage = `No ${piece} can move to ${to}.`;
+                if (state.isCheck) {
+                    errorMessage += "\nYou are in CHECK! You must move to get out of check.";
+                } else {
+                    errorMessage += " Please try a different move.";
+                }
+                await this.updateBoardAndFeedback(sessionId, errorMessage);
                 return;
             }
 
@@ -834,6 +886,14 @@ export class ChessServer extends AppServer {
         // Update game state
         state.currentPlayer = state.currentPlayer === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
         state.currentFEN = boardToFEN(state);
+        
+        // Update check status for the new current player
+        state.isCheck = isInCheck(state.board, state.currentPlayer);
+        
+        // Debug logging for check detection
+        if (state.isCheck) {
+            console.log(`Check detected for ${state.currentPlayer} player after AI move`);
+        }
 
         // Invalidate board cache since the board has changed
         this.invalidateBoardCache(sessionId);
