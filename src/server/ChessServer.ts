@@ -59,6 +59,9 @@ export class ChessServer extends AppServer {
             this.stockfishService = null as any;
         }
         this.sessionManager = new SessionManager();
+        
+        // Set up periodic board cache cleanup
+        this.setupPeriodicCleanup();
     }
 
     protected async onSession(session: AppSession, sessionId: string, userId: string): Promise<void> {
@@ -106,10 +109,45 @@ export class ChessServer extends AppServer {
     protected async onStop(sessionId: string, userId: string, reason: string): Promise<void> {
         this.logger.info('Chess session stopped', { sessionId, userId, reason });
 
+        // Get session before removal to access cleanup functions
+        const gameSession = this.sessionManager.getSession(sessionId);
+        
+        if (gameSession) {
+            // Clear any active timeouts
+            if (gameSession.state.timeoutId) {
+                clearTimeout(gameSession.state.timeoutId);
+                gameSession.state.timeoutId = null;
+            }
+
+            // Clean up all event handlers
+            if (gameSession.cleanupFunctions && gameSession.cleanupFunctions.length > 0) {
+                this.logger.info(`Cleaning up ${gameSession.cleanupFunctions.length} event handlers for session ${sessionId}`);
+                gameSession.cleanupFunctions.forEach(cleanup => {
+                    try {
+                        cleanup();
+                    } catch (error) {
+                        this.logger.warn('Error during event handler cleanup:', error);
+                    }
+                });
+            }
+
+            // Clean up dashboard integration
+            if (gameSession.dashboardCleanup) {
+                try {
+                    gameSession.dashboardCleanup();
+                } catch (error) {
+                    this.logger.warn('Error during dashboard cleanup:', error);
+                }
+            }
+        }
+
         // Clean up board cache for this session
         this.invalidateBoardCache(sessionId);
 
+        // Remove session from manager
         this.sessionManager.removeSession(sessionId);
+        
+        this.logger.info('Session cleanup completed', { sessionId });
     }
 
     private setupEventHandlers(sessionId: string): void {
@@ -374,6 +412,19 @@ export class ChessServer extends AppServer {
                 this.boardCache.delete(key);
             }
         }
+    }
+
+    private setupPeriodicCleanup(): void {
+        // Clean up board cache every 5 minutes
+        setInterval(() => {
+            try {
+                this.cleanupBoardCache();
+                const stats = this.getMemoryStats();
+                console.log(`[ChessServer] Board cache cleanup completed. Cache size: ${stats.boardCacheSize}, Active sessions: ${stats.activeSessions}, Memory: ${stats.totalMemoryUsage}MB`);
+            } catch (error) {
+                console.error('[ChessServer] Error during board cache cleanup:', error);
+            }
+        }, 5 * 60 * 1000); // 5 minutes
     }
 
     private async startGame(sessionId: string): Promise<void> {
@@ -643,18 +694,31 @@ export class ChessServer extends AppServer {
 
     private async handleClarificationTimeout(sessionId: string): Promise<void> {
         const gameSession = this.sessionManager.getSession(sessionId);
-        if (!gameSession) return;
+        if (!gameSession) {
+            // Session was already cleaned up, ignore timeout
+            console.log(`[ChessServer] Clarification timeout for non-existent session: ${sessionId}`);
+            return;
+        }
 
         const { appSession, state } = gameSession;
+
+        // Double-check that we're still in clarification mode
+        if (state.mode !== SessionMode.AWAITING_CLARIFICATION) {
+            console.log(`[ChessServer] Clarification timeout but not in clarification mode: ${sessionId}, mode: ${state.mode}`);
+            return;
+        }
 
         state.mode = SessionMode.USER_TURN;
         state.clarificationData = undefined;
         state.timeoutId = null;
 
-        await this.updateBoardAndFeedback(sessionId, "Move clarification timed out. Please make your move again.");
-
-        // Update dashboard
-        this.updateDashboardContent(sessionId);
+        try {
+            await this.updateBoardAndFeedback(sessionId, "Move clarification timed out. Please make your move again.");
+            // Update dashboard
+            this.updateDashboardContent(sessionId);
+        } catch (error) {
+            console.error(`[ChessServer] Error handling clarification timeout for session ${sessionId}:`, error);
+        }
     }
 
     private async handleCastlingMove(sessionId: string, side: 'kingside' | 'queenside'): Promise<void> {
@@ -1041,26 +1105,52 @@ export class ChessServer extends AppServer {
         return this.sessionManager.getState(sessionId) || null;
     }
 
+    public getMemoryStats(): {
+        activeSessions: number;
+        boardCacheSize: number;
+        totalMemoryUsage: number;
+    } {
+        const memUsage = process.memoryUsage();
+        return {
+            activeSessions: this.sessionManager.getActiveSessionsCount(),
+            boardCacheSize: this.boardCache.size,
+            totalMemoryUsage: Math.round(memUsage.heapUsed / 1024 / 1024) // MB
+        };
+    }
+
     public async start(): Promise<void> {
         await super.start();
         console.log('Chess server started successfully');
     }
 
     public async stop(): Promise<void> {
-        // Clean up all active sessions
-        this.sessionManager.stopAllSessions();
+        console.log('[ChessServer] Stopping chess server...');
+        
+        // Stop all active sessions properly
+        const sessionIds = this.sessionManager.getAllSessionIds();
+        for (const sessionId of sessionIds) {
+            try {
+                await this.onStop(sessionId, 'system', 'server_shutdown');
+            } catch (error) {
+                console.error(`[ChessServer] Error stopping session ${sessionId}:`, error);
+            }
+        }
         
         // Stop Stockfish service
         if (this.stockfishService) {
             try {
                 await this.stockfishService.stop();
-                console.log('Stockfish service stopped successfully');
+                console.log('[ChessServer] Stockfish service stopped');
             } catch (error) {
-                console.warn('Error stopping Stockfish service:', error);
+                console.error('[ChessServer] Error stopping Stockfish service:', error);
             }
         }
         
+        // Clear board cache
+        this.boardCache.clear();
+        console.log('[ChessServer] Board cache cleared');
+        
         await super.stop();
-        console.log('Chess server stopped successfully');
+        console.log('[ChessServer] Chess server stopped successfully');
     }
 } 
