@@ -1,4 +1,5 @@
 import { AppServer, AppSession, AppServerConfig, ViewType, StreamType, DashboardMode } from '@mentra/sdk';
+import express from 'express';
 import { 
     SessionState, 
     SessionMode, 
@@ -36,6 +37,7 @@ export class ChessServer extends AppServer {
     protected sessionManager: SessionManager;
     private readonly CLARIFICATION_TIMEOUT = 30000; // 30 seconds
     private stockfishService: StockfishService;
+    private expressApp: express.Application;
 
     // Cache for board rendering to reduce latency
     private boardCache: Map<string, { boardText: string; timestamp: number; useUnicode: boolean }> = new Map();
@@ -43,6 +45,10 @@ export class ChessServer extends AppServer {
 
     constructor(config: AppServerConfig) {
         super(config);
+        
+        // Initialize Express app for health checks
+        this.expressApp = express();
+        this.setupHealthEndpoints();
         
         // Initialize Stockfish service
         console.log('Initializing Stockfish service in ChessServer...');
@@ -1118,7 +1124,40 @@ export class ChessServer extends AppServer {
         };
     }
 
+    private setupHealthEndpoints(): void {
+        // Health check endpoint for Railway
+        this.expressApp.get('/', (req, res) => {
+            res.status(200).json({
+                status: 'healthy',
+                service: 'AR Chess Server',
+                timestamp: new Date().toISOString(),
+                uptime: process.uptime()
+            });
+        });
+
+        // Health check endpoint with more details
+        this.expressApp.get('/health', (req, res) => {
+            const memoryStats = this.getMemoryStats();
+            res.status(200).json({
+                status: 'healthy',
+                service: 'AR Chess Server',
+                version: '1.0.0',
+                timestamp: new Date().toISOString(),
+                uptime: process.uptime(),
+                memory: memoryStats,
+                environment: process.env.NODE_ENV || 'development'
+            });
+        });
+    }
+
     public async start(): Promise<void> {
+        // Start Express server for health checks
+        const port = parseInt(process.env.PORT || '3000');
+        this.expressApp.listen(port, () => {
+            console.log(`✅ Health check server running on port ${port}`);
+            console.log(`🔗 Health check available at: http://localhost:${port}/health`);
+        });
+        
         await super.start();
         console.log('Chess server started successfully');
     }

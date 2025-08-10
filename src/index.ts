@@ -1,7 +1,6 @@
 import { AppServerConfig } from '@mentra/sdk';
 import { ChessServer } from './server/ChessServer';
 import dotenv from 'dotenv';
-import express from 'express';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -28,68 +27,25 @@ console.log('Starting AR Chess Server...');
 console.log(`Package Name: ${config.packageName}`);
 console.log(`Port: ${config.port}`);
 
-// Create Express app for health checks
-const app = express();
-const port = config.port;
-
-// Health check endpoint for Railway
-app.get('/', (req, res) => {
-    res.status(200).json({
-        status: 'healthy',
-        service: 'AR Chess Server',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime()
-    });
-});
-
-// Health check endpoint with more details
-app.get('/health', (req, res) => {
-    const memoryStats = chessServer?.getMemoryStats() || {
-        activeSessions: 0,
-        boardCacheSize: 0,
-        totalMemoryUsage: 0
-    };
-    
-    res.status(200).json({
-        status: 'healthy',
-        service: 'AR Chess Server',
-        version: '1.0.0',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        memory: memoryStats,
-        environment: process.env.NODE_ENV || 'development'
-    });
-});
-
 // Create and start the chess server
 const chessServer = new ChessServer(config);
 
-// Start both servers
-async function startServers() {
-    try {
-        // Start Express server for health checks
-        app.listen(port, () => {
-            console.log(`Health check server running on port ${port}`);
-            console.log(`Health check available at: http://localhost:${port}/health`);
-        });
-
-        // Start the chess server
-        await chessServer.start();
-        console.log(`AR Chess Server started successfully on port ${port}`);
-        console.log('Server is ready to handle chess game sessions!');
+chessServer.start()
+    .then(() => {
+        console.log(`✅ AR Chess Server started successfully on port ${config.port}`);
+        console.log('🎮 Server is ready to handle chess game sessions!');
         console.log('\nFeatures:');
         console.log('- Voice-controlled chess gameplay');
         console.log('- Real-time AR display updates');
         console.log('- AI opponent with configurable difficulty');
         console.log('- Ambiguous move resolution');
         console.log('- Game state management');
-    } catch (error) {
-        console.error('Failed to start servers:', error);
+        console.log(`🔗 Health check available at: http://localhost:${config.port}/health`);
+    })
+    .catch((error) => {
+        console.error('❌ Failed to start AR Chess Server:', error);
         process.exit(1);
-    }
-}
-
-startServers();
+    });
 
 // Graceful shutdown handling
 process.on('SIGINT', () => {
