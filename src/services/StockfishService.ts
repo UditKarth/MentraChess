@@ -24,23 +24,39 @@ export class StockfishService {
 
     private initializeStockfish(): void {
         try {
-            // Use the actual Stockfish binary instead of WASM
-            this.stockfish = spawn('stockfish', [], { stdio: ['pipe', 'pipe', 'pipe'] });
+            console.log('🔧 Attempting to spawn Stockfish from npm package...');
+            
+            // Use the npm package's stockfishjs wrapper
+            const stockfishPath = path.join(process.cwd(), 'node_modules', 'stockfish', 'stockfishjs');
+            this.stockfish = spawn('node', [stockfishPath], { stdio: ['pipe', 'pipe', 'pipe'] });
+            
+            console.log('✅ Stockfish process spawned successfully');
+            
             this.stockfish.stdout.on('data', (data: Buffer) => {
+                console.log(`📤 Stockfish stdout: ${data.toString().trim()}`);
                 this.handleStockfishMessage(data.toString());
             });
+            
             this.stockfish.stderr.on('data', (data: Buffer) => {
-                // TODO: Implement error handling
+                console.log(`⚠️ Stockfish stderr: ${data.toString().trim()}`);
             });
+            
             this.stockfish.on('error', (err) => {
-                console.error('Stockfish process error:', err);
+                console.error('❌ Stockfish process error:', err);
                 this.stockfish = null;
                 this.isReady = false;
                 this.isInitialized = true;
             });
+            
+            this.stockfish.on('exit', (code, signal) => {
+                console.log(`🔄 Stockfish process exited with code ${code}, signal ${signal}`);
+                this.stockfish = null;
+                this.isReady = false;
+            });
+            
             this.initializeEngine();
         } catch (error) {
-            console.error('Failed to spawn stockfish binary:', error);
+            console.error('❌ Failed to spawn stockfish from npm package:', error);
             this.stockfish = null;
             this.isReady = false;
             this.isInitialized = true;
@@ -48,12 +64,18 @@ export class StockfishService {
     }
 
     private initializeEngine(): void {
-        if (!this.stockfish) return;
+        if (!this.stockfish) {
+            console.log('❌ Cannot initialize engine - Stockfish process not available');
+            return;
+        }
+        
+        console.log('🔧 Initializing Stockfish engine...');
         this.sendCommand('uci');
         this.sendCommand('isready');
         this.sendCommand('setoption name MultiPV value 1');
         this.sendCommand('setoption name Threads value 2');
         this.sendCommand('setoption name Hash value 64');
+        console.log('📤 Engine initialization commands sent');
     }
 
     private handleStockfishMessage(message: string): void {
@@ -64,11 +86,13 @@ export class StockfishService {
             if (line === 'readyok') {
                 this.isReady = true;
                 this.isInitialized = true;
-                console.log('Stockfish engine ready');
+                console.log('✅ Stockfish engine ready');
             } else if (line.startsWith('bestmove')) {
                 this.handleBestMove(line);
             } else if (line.startsWith('info')) {
                 this.handleInfo(line);
+            } else if (line.trim()) {
+                console.log(`📥 Stockfish message: ${line.trim()}`);
             }
         }
     }
