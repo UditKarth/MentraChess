@@ -35,7 +35,7 @@ Set these environment variables (or in a `.env` file):
 - Works on Railway, Vercel, and all Node.js hosts
 
 ## Health Check
-- `GET /health` — Server status
+- `GET /health` — Server status (handled by MentraOS SDK)
 
 ## Project Structure
 ```

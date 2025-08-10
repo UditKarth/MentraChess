@@ -13,6 +13,13 @@ restartPolicyMaxRetries = 10
 [build.environment]
 NPM_CONFIG_PRODUCTION = "false"
 
+# Health check configuration
+[deploy.healthcheck]
+path = "/health"
+timeout = 300
+interval = 30
+retries = 3
+
 
 
 

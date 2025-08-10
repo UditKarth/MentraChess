@@ -1,5 +1,4 @@
 import { AppServer, AppSession, AppServerConfig, ViewType, StreamType, DashboardMode } from '@mentra/sdk';
-import express from 'express';
 import { 
     SessionState, 
     SessionMode, 
@@ -37,7 +36,7 @@ export class ChessServer extends AppServer {
     protected sessionManager: SessionManager;
     private readonly CLARIFICATION_TIMEOUT = 30000; // 30 seconds
     private stockfishService: StockfishService;
-    private expressApp: express.Application;
+
 
     // Cache for board rendering to reduce latency
     private boardCache: Map<string, { boardText: string; timestamp: number; useUnicode: boolean }> = new Map();
@@ -46,9 +45,7 @@ export class ChessServer extends AppServer {
     constructor(config: AppServerConfig) {
         super(config);
         
-        // Initialize Express app for health checks
-        this.expressApp = express();
-        this.setupHealthEndpoints();
+
         
         // Initialize Stockfish service
         console.log('Initializing Stockfish service in ChessServer...');
@@ -1124,100 +1121,11 @@ export class ChessServer extends AppServer {
         };
     }
 
-    private setupHealthEndpoints(): void {
-        // Health check endpoint for Railway
-        this.expressApp.get('/', (req, res) => {
-            console.log(`🔍 Health check hit: ${req.method} ${req.path} from ${req.ip}`);
-            res.status(200).json({
-                status: 'healthy',
-                service: 'AR Chess Server',
-                timestamp: new Date().toISOString(),
-                uptime: process.uptime()
-            });
-        });
 
-        // Health check endpoint with more details
-        this.expressApp.get('/health', (req, res) => {
-            console.log(`🔍 Health check hit: ${req.method} ${req.path} from ${req.ip}`);
-            const memoryStats = this.getMemoryStats();
-            res.status(200).json({
-                status: 'healthy',
-                service: 'AR Chess Server',
-                version: '1.0.0',
-                timestamp: new Date().toISOString(),
-                uptime: process.uptime(),
-                memory: memoryStats,
-                environment: process.env.NODE_ENV || 'development'
-            });
-        });
-        
-        // Add a catch-all route for debugging
-        this.expressApp.use('*', (req, res) => {
-            console.log(`🔍 Unknown route hit: ${req.method} ${req.originalUrl} from ${req.ip}`);
-            res.status(404).json({
-                error: 'Not found',
-                path: req.originalUrl,
-                available: ['/', '/health']
-            });
-        });
-    }
 
     public async start(): Promise<void> {
-        try {
-            console.log('🚀 Starting ChessServer...');
-            
-            // Start the MentraOS server first
-            await super.start();
-            console.log('✅ MentraOS server started successfully');
-            
-            // Try to add HTTP endpoints to the existing server
-            // This is a workaround - we'll create a simple HTTP server on the same port
-            const port = parseInt(process.env.PORT || '3000');
-            console.log(`🚀 Adding health endpoints to port ${port}...`);
-            
-            // Create a simple HTTP server for health checks
-            const http = require('http');
-            const healthServer = http.createServer((req: any, res: any) => {
-                console.log(`🔍 Health check hit: ${req.method} ${req.url}`);
-                
-                if (req.url === '/health' || req.url === '/') {
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    const memoryStats = this.getMemoryStats();
-                    res.end(JSON.stringify({
-                        status: 'healthy',
-                        service: 'AR Chess Server',
-                        version: '1.0.0',
-                        timestamp: new Date().toISOString(),
-                        uptime: process.uptime(),
-                        memory: memoryStats,
-                        environment: process.env.NODE_ENV || 'development'
-                    }));
-                } else {
-                    res.writeHead(404, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: 'Not found', available: ['/', '/health'] }));
-                }
-            });
-            
-            // Try to bind to the port, but handle the case where it's already in use
-            healthServer.listen(port, () => {
-                console.log(`✅ Health check server running on port ${port}`);
-                console.log(`🔗 Health check available at: http://localhost:${port}/health`);
-            });
-            
-            healthServer.on('error', (error: any) => {
-                if (error.code === 'EADDRINUSE') {
-                    console.log(`⚠️ Port ${port} already in use by MentraOS server`);
-                    console.log('🔍 Health checks will be handled by MentraOS server');
-                } else {
-                    console.error('❌ Health server error:', error);
-                }
-                // Don't fail the startup if health server fails
-            });
-            
-        } catch (error) {
-            console.error('❌ Failed to start servers:', error);
-            throw error;
-        }
+        await super.start();
+        console.log('Chess server started successfully');
     }
 
     public async stop(): Promise<void> {
