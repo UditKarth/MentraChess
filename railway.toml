@@ -12,3 +12,5 @@ restartPolicyMaxRetries = 10
 # Force Railway to use our Dockerfile instead of auto-detecting package managers
 [build.environment]
 NPM_CONFIG_PRODUCTION = "false"
+
+
