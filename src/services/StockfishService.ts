@@ -26,8 +26,8 @@ export class StockfishService {
         try {
             console.log('🔧 Attempting to spawn Stockfish from npm package...');
             
-            // Run the JavaScript file directly (bypass the shell script wrapper)
-            const stockfishJsPath = path.join(process.cwd(), 'node_modules', 'stockfish', 'src', 'stockfish.js');
+            // Run the single-threaded JavaScript file directly
+            const stockfishJsPath = path.join(process.cwd(), 'node_modules', 'stockfish', 'src', 'stockfish-nnue-16-single.js');
             this.stockfish = spawn('node', [stockfishJsPath], { stdio: ['pipe', 'pipe', 'pipe'] });
             
             console.log('✅ Stockfish process spawned successfully');
