@@ -7,14 +7,17 @@ WORKDIR /usr/src/app
 # Copy package files for dependency installation
 COPY package*.json ./
 
-# Install dependencies (this includes the stockfish npm package)
-RUN npm ci --only=production
+# Install ALL dependencies (including dev dependencies for TypeScript build)
+RUN npm ci
 
 # Copy source code
 COPY . .
 
 # Build TypeScript
 RUN npm run build
+
+# Remove dev dependencies to reduce image size (keep only production)
+RUN npm prune --production
 
 # Expose the port
 EXPOSE 3000
