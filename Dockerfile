@@ -1,8 +1,11 @@
 # Use official Node.js runtime as base image
 FROM node:18-alpine
 
-# Install Stockfish chess engine
-RUN apk add --no-cache stockfish
+# Install Stockfish chess engine from Alpine testing repository
+RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories && \
+    apk update && \
+    apk add --no-cache stockfish && \
+    apk cache clean
 
 # Set working directory
 WORKDIR /usr/src/app
