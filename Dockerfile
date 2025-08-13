@@ -1,6 +1,9 @@
 # Use official Node.js runtime as base image
 FROM node:18-alpine
 
+# Install Stockfish chess engine
+RUN apk add --no-cache stockfish
+
 # Set working directory
 WORKDIR /usr/src/app
 

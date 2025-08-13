@@ -51,11 +51,7 @@ export class ChessServer extends AppServer {
         console.log('Initializing Stockfish service in ChessServer...');
         try {
             this.stockfishService = new StockfishService();
-            if (this.stockfishService.isEngineReady()) {
-                console.log('Stockfish service initialized successfully');
-            } else {
-                console.log('Stockfish service initialized (fallback mode - using simple AI)');
-            }
+            console.log('Stockfish service created - will check readiness when making moves');
         } catch (error) {
             console.warn('Failed to initialize Stockfish service:', error);
             console.log('Continuing with simple AI fallback...');

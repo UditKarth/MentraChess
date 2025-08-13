@@ -1,7 +1,6 @@
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
 import { SessionState, Difficulty } from '../utils/types';
 import { boardToFEN } from '../chess_logic';
-import path from 'path';
 
 export interface StockfishMove {
     source: string;
@@ -24,21 +23,20 @@ export class StockfishService {
 
     private initializeStockfish(): void {
         try {
-            console.log('🔧 Attempting to spawn Stockfish from npm package...');
-            
-            // Run the single-threaded JavaScript file directly
-            const stockfishJsPath = path.join(process.cwd(), 'node_modules', 'stockfish', 'src', 'stockfish-nnue-16-single.js');
-            this.stockfish = spawn('node', [stockfishJsPath], { stdio: ['pipe', 'pipe', 'pipe'] });
-            
-            console.log('✅ Stockfish process spawned successfully');
+            console.log('🔧 Initializing Stockfish engine...');
+            // Use the actual Stockfish binary instead of WASM
+            this.stockfish = spawn('stockfish', [], { stdio: ['pipe', 'pipe', 'pipe'] });
             
             this.stockfish.stdout.on('data', (data: Buffer) => {
-                console.log(`📤 Stockfish stdout: ${data.toString().trim()}`);
-                this.handleStockfishMessage(data.toString());
+                const message = data.toString();
+                console.log(`📤 Stockfish stdout: ${message.trim()}`);
+                this.handleStockfishMessage(message);
             });
             
             this.stockfish.stderr.on('data', (data: Buffer) => {
-                console.log(`⚠️ Stockfish stderr: ${data.toString().trim()}`);
+                const message = data.toString();
+                console.log(`⚠️ Stockfish stderr: ${message.trim()}`);
+                // Don't treat stderr as an error - Stockfish often writes to stderr
             });
             
             this.stockfish.on('error', (err) => {
@@ -56,7 +54,7 @@ export class StockfishService {
             
             this.initializeEngine();
         } catch (error) {
-            console.error('❌ Failed to spawn stockfish from npm package:', error);
+            console.error('❌ Failed to spawn stockfish binary:', error);
             this.stockfish = null;
             this.isReady = false;
             this.isInitialized = true;
@@ -70,10 +68,15 @@ export class StockfishService {
         }
         
         console.log('🔧 Initializing Stockfish engine...');
+        console.log(`[DEBUG] StockfishService.initializeEngine: Sending uci command`);
         this.sendCommand('uci');
+        console.log(`[DEBUG] StockfishService.initializeEngine: Sending isready command`);
         this.sendCommand('isready');
+        console.log(`[DEBUG] StockfishService.initializeEngine: Sending MultiPV option`);
         this.sendCommand('setoption name MultiPV value 1');
+        console.log(`[DEBUG] StockfishService.initializeEngine: Sending Threads option`);
         this.sendCommand('setoption name Threads value 2');
+        console.log(`[DEBUG] StockfishService.initializeEngine: Sending Hash option`);
         this.sendCommand('setoption name Hash value 64');
         console.log('📤 Engine initialization commands sent');
     }
@@ -82,34 +85,34 @@ export class StockfishService {
         this.buffer += message;
         let lines = this.buffer.split('\n');
         this.buffer = lines.pop() || '';
+        
         for (const line of lines) {
+            console.log(`[DEBUG] StockfishService.handleStockfishMessage: Processing line: "${line}"`);
+            
             if (line === 'readyok') {
                 this.isReady = true;
                 this.isInitialized = true;
                 console.log('✅ Stockfish engine ready');
             } else if (line.startsWith('bestmove')) {
+                console.log(`[DEBUG] StockfishService.handleStockfishMessage: Received bestmove: ${line}`);
                 this.handleBestMove(line);
             } else if (line.startsWith('info')) {
+                // console.log(`[DEBUG] StockfishService.handleStockfishMessage: Received info: ${line}`);
                 this.handleInfo(line);
-            } else if (line.trim()) {
-                console.log(`📥 Stockfish message: ${line.trim()}`);
             }
         }
     }
 
     private handleBestMove(line: string): void {
-        console.log(`[DEBUG] StockfishService.handleBestMove: Received line: ${line}`);
         const parts = line.split(' ');
         if (parts.length >= 2) {
             const bestMove = parts[1];
-            console.log(`[DEBUG] StockfishService.handleBestMove: Best move: ${bestMove}`);
+            console.log(`[DEBUG] StockfishService.handleBestMove: Parsed bestmove: ${bestMove}`);
             if (this.currentRequest && bestMove) {
                 const move = this.parseMove(bestMove);
-                console.log(`[DEBUG] StockfishService.handleBestMove: Parsed move: ${JSON.stringify(move)}`);
+                console.log(`[DEBUG] StockfishService.handleBestMove: Resolving with move: ${JSON.stringify(move)}`);
                 this.currentRequest.resolve(move);
                 this.currentRequest = null;
-            } else {
-                console.log(`[DEBUG] StockfishService.handleBestMove: No current request or no best move`);
             }
         }
     }
@@ -130,6 +133,7 @@ export class StockfishService {
 
     private sendCommand(command: string): void {
         if (!this.stockfish) return;
+        console.log(`[DEBUG] StockfishService.sendCommand: ${command}`);
         this.stockfish.stdin.write(command + '\n');
     }
 
@@ -139,35 +143,34 @@ export class StockfishService {
         timeLimit: number = 2000
     ): Promise<StockfishMove | null> {
         console.log(`[DEBUG] StockfishService.getBestMove: Starting move calculation`);
-        console.log(`[DEBUG] StockfishService.getBestMove: isInitialized: ${this.isInitialized}, isReady: ${this.isReady}, stockfish: ${!!this.stockfish}`);
+        console.log(`[DEBUG] StockfishService.getBestMove: Initialized: ${this.isInitialized}, Ready: ${this.isReady}`);
         
         if (!this.isInitialized) {
-            console.log(`[DEBUG] StockfishService.getBestMove: Engine not initialized`);
             throw new Error('Stockfish engine not initialized');
         }
         if (!this.isReady || !this.stockfish) {
-            console.log(`[DEBUG] StockfishService.getBestMove: Engine not ready or not available`);
+            console.log(`[DEBUG] StockfishService.getBestMove: Engine not ready, returning null`);
             return null;
         }
         
-        console.log(`[DEBUG] StockfishService.getBestMove: Engine ready, calculating move`);
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 console.log(`[DEBUG] StockfishService.getBestMove: Timeout reached`);
                 reject(new Error('Stockfish move calculation timeout'));
             }, timeLimit + 1000);
+            
             this.currentRequest = { resolve, reject, timeout };
             const depth = this.getDepthForDifficulty(difficulty);
             const movetime = this.getMoveTimeForDifficulty(difficulty, timeLimit);
             const fen = boardToFEN(state);
+            
             console.log(`[DEBUG] StockfishService.getBestMove: FEN: ${fen}`);
             console.log(`[DEBUG] StockfishService.getBestMove: Depth: ${depth}, MoveTime: ${movetime}`);
+            
             this.sendCommand(`position fen ${fen}`);
             if (depth > 0) {
-                console.log(`[DEBUG] StockfishService.getBestMove: Sending go depth ${depth}`);
                 this.sendCommand(`go depth ${depth}`);
             } else {
-                console.log(`[DEBUG] StockfishService.getBestMove: Sending go movetime ${movetime}`);
                 this.sendCommand(`go movetime ${movetime}`);
             }
         });
