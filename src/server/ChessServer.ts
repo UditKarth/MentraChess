@@ -69,10 +69,12 @@ export class ChessServer extends AppServer {
 
     protected async onSession(session: AppSession, sessionId: string, userId: string): Promise<void> {
         this.logger.info('New chess session started', { sessionId, userId });
+        console.log(`[DEBUG] onSession called with sessionId: ${sessionId}, userId: ${userId}`);
 
         // Get settings from MentraOS
         const userColor = session.settings.get<string>('user_color', 'white');
         const aiDifficulty = session.settings.get<string>('ai_difficulty', 'medium');
+        console.log(`[DEBUG] User settings - color: ${userColor}, difficulty: ${aiDifficulty}`);
 
         // Initialize game state
         const initialState: SessionState = {
@@ -96,17 +98,24 @@ export class ChessServer extends AppServer {
             lastActivityTime: new Date()
         };
 
+        console.log(`[DEBUG] Initial game state created for session: ${sessionId}`);
+
         // Create game session
         this.sessionManager.initializeSession(sessionId, initialState, userId, session);
+        console.log(`[DEBUG] Session initialized in SessionManager`);
 
         // Set up event handlers
         this.setupEventHandlers(sessionId);
+        console.log(`[DEBUG] Event handlers set up`);
 
         // Set up dashboard integration
         this.setupDashboardIntegration(sessionId);
+        console.log(`[DEBUG] Dashboard integration set up`);
 
         // Start the game directly (skip color/difficulty selection)
+        console.log(`[DEBUG] Starting game for session: ${sessionId}`);
         await this.startGame(sessionId);
+        console.log(`[DEBUG] Game started successfully for session: ${sessionId}`);
     }
 
     protected async onStop(sessionId: string, userId: string, reason: string): Promise<void> {
@@ -326,20 +335,33 @@ export class ChessServer extends AppServer {
     // Helper to update board and feedback using DoubleTextWall
     private async updateBoardAndFeedback(sessionId: string, feedback: string) {
         const gameSession = this.sessionManager.getSession(sessionId);
-        if (!gameSession) return;
+        if (!gameSession) {
+            console.log(`[DEBUG] updateBoardAndFeedback: No game session found for sessionId: ${sessionId}`);
+            return;
+        }
+        
+        console.log(`[DEBUG] updateBoardAndFeedback: Found game session for sessionId: ${sessionId}`);
         const { appSession, state } = gameSession;
         
         try {
+            console.log(`[DEBUG] updateBoardAndFeedback: Getting cached board text`);
             // Use cached board text for better performance
             const boardText = this.getCachedBoardText(sessionId, state, appSession);
+            console.log(`[DEBUG] updateBoardAndFeedback: Board text length: ${boardText.length}`);
+            console.log(`[DEBUG] updateBoardAndFeedback: Board text preview: ${boardText.substring(0, 100)}...`);
+            
+            console.log(`[DEBUG] updateBoardAndFeedback: Calling showDoubleTextWall`);
             await appSession.layouts.showDoubleTextWall(boardText, feedback);
+            console.log(`[DEBUG] updateBoardAndFeedback: showDoubleTextWall completed successfully`);
         } catch (error) {
-            console.error('Error updating board and feedback:', error);
+            console.error(`[DEBUG] updateBoardAndFeedback: Error updating board and feedback:`, error);
             // Fallback: try to show just the feedback
             try {
+                console.log(`[DEBUG] updateBoardAndFeedback: Trying fallback with showTextWall`);
                 await appSession.layouts.showTextWall(feedback, { durationMs: 3000 });
+                console.log(`[DEBUG] updateBoardAndFeedback: Fallback showTextWall completed`);
             } catch (fallbackError) {
-                console.error('Fallback layout also failed:', fallbackError);
+                console.error(`[DEBUG] updateBoardAndFeedback: Fallback layout also failed:`, fallbackError);
             }
         }
     }
@@ -366,6 +388,7 @@ export class ChessServer extends AppServer {
     }
 
     private getCachedBoardText(sessionId: string, state: SessionState, appSession: AppSession): string {
+        console.log(`[DEBUG] getCachedBoardText: Starting for sessionId: ${sessionId}`);
         const now = Date.now();
         const cacheKey = `${sessionId}_${state.currentFEN}`;
         const cached = this.boardCache.get(cacheKey);
@@ -373,16 +396,21 @@ export class ChessServer extends AppServer {
         // Get user preferences from settings (cache this too if needed)
         const useUnicodeSetting = appSession.settings.get<string>('use_unicode', 'true');
         const useUnicode = useUnicodeSetting === 'true' || useUnicodeSetting === 'TRUE' || useUnicodeSetting === '1';
+        console.log(`[DEBUG] getCachedBoardText: useUnicode setting: ${useUnicodeSetting}, resolved: ${useUnicode}`);
         
         // Check if we have a valid cached version
         if (cached && 
             cached.useUnicode === useUnicode && 
             (now - cached.timestamp) < this.BOARD_CACHE_DURATION) {
+            console.log(`[DEBUG] getCachedBoardText: Using cached board text, length: ${cached.boardText.length}`);
             return cached.boardText;
         }
         
+        console.log(`[DEBUG] getCachedBoardText: Generating new board text`);
         // Generate new board text
         const boardText = renderBoardString(state, { useUnicode });
+        console.log(`[DEBUG] getCachedBoardText: Generated board text length: ${boardText.length}`);
+        console.log(`[DEBUG] getCachedBoardText: Board text preview: ${boardText.substring(0, 100)}...`);
         
         // Cache the result
         this.boardCache.set(cacheKey, {
@@ -432,18 +460,33 @@ export class ChessServer extends AppServer {
 
     private async startGame(sessionId: string): Promise<void> {
         const gameSession = this.sessionManager.getSession(sessionId);
-        if (!gameSession) return;
+        if (!gameSession) {
+            console.log(`[DEBUG] startGame: No game session found for sessionId: ${sessionId}`);
+            return;
+        }
 
+        console.log(`[DEBUG] startGame: Found game session for sessionId: ${sessionId}`);
         const { state } = gameSession;
-        await this.updateBoardAndFeedback(sessionId, 'Game started!');
+        
+        try {
+            console.log(`[DEBUG] startGame: Calling updateBoardAndFeedback`);
+            await this.updateBoardAndFeedback(sessionId, 'Game started!');
+            console.log(`[DEBUG] startGame: updateBoardAndFeedback completed`);
 
-        // Determine first player
-        if (state.userColor === PlayerColor.BLACK) {
-            state.currentPlayer = PlayerColor.WHITE;
-            await this.makeAIMove(sessionId);
-        } else {
-            state.currentPlayer = PlayerColor.WHITE;
-            await this.promptUserMove(sessionId);
+            // Determine first player
+            if (state.userColor === PlayerColor.BLACK) {
+                console.log(`[DEBUG] startGame: User is black, AI goes first`);
+                state.currentPlayer = PlayerColor.WHITE;
+                await this.makeAIMove(sessionId);
+            } else {
+                console.log(`[DEBUG] startGame: User is white, user goes first`);
+                state.currentPlayer = PlayerColor.WHITE;
+                await this.promptUserMove(sessionId);
+            }
+            console.log(`[DEBUG] startGame: Game initialization completed`);
+        } catch (error) {
+            console.error(`[DEBUG] startGame: Error during game start:`, error);
+            throw error;
         }
     }
 
