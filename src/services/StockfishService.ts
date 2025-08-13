@@ -98,13 +98,18 @@ export class StockfishService {
     }
 
     private handleBestMove(line: string): void {
+        console.log(`[DEBUG] StockfishService.handleBestMove: Received line: ${line}`);
         const parts = line.split(' ');
         if (parts.length >= 2) {
             const bestMove = parts[1];
+            console.log(`[DEBUG] StockfishService.handleBestMove: Best move: ${bestMove}`);
             if (this.currentRequest && bestMove) {
                 const move = this.parseMove(bestMove);
+                console.log(`[DEBUG] StockfishService.handleBestMove: Parsed move: ${JSON.stringify(move)}`);
                 this.currentRequest.resolve(move);
                 this.currentRequest = null;
+            } else {
+                console.log(`[DEBUG] StockfishService.handleBestMove: No current request or no best move`);
             }
         }
     }
@@ -133,24 +138,36 @@ export class StockfishService {
         difficulty: Difficulty = Difficulty.MEDIUM,
         timeLimit: number = 2000
     ): Promise<StockfishMove | null> {
+        console.log(`[DEBUG] StockfishService.getBestMove: Starting move calculation`);
+        console.log(`[DEBUG] StockfishService.getBestMove: isInitialized: ${this.isInitialized}, isReady: ${this.isReady}, stockfish: ${!!this.stockfish}`);
+        
         if (!this.isInitialized) {
+            console.log(`[DEBUG] StockfishService.getBestMove: Engine not initialized`);
             throw new Error('Stockfish engine not initialized');
         }
         if (!this.isReady || !this.stockfish) {
+            console.log(`[DEBUG] StockfishService.getBestMove: Engine not ready or not available`);
             return null;
         }
+        
+        console.log(`[DEBUG] StockfishService.getBestMove: Engine ready, calculating move`);
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
+                console.log(`[DEBUG] StockfishService.getBestMove: Timeout reached`);
                 reject(new Error('Stockfish move calculation timeout'));
             }, timeLimit + 1000);
             this.currentRequest = { resolve, reject, timeout };
             const depth = this.getDepthForDifficulty(difficulty);
             const movetime = this.getMoveTimeForDifficulty(difficulty, timeLimit);
             const fen = boardToFEN(state);
+            console.log(`[DEBUG] StockfishService.getBestMove: FEN: ${fen}`);
+            console.log(`[DEBUG] StockfishService.getBestMove: Depth: ${depth}, MoveTime: ${movetime}`);
             this.sendCommand(`position fen ${fen}`);
             if (depth > 0) {
+                console.log(`[DEBUG] StockfishService.getBestMove: Sending go depth ${depth}`);
                 this.sendCommand(`go depth ${depth}`);
             } else {
+                console.log(`[DEBUG] StockfishService.getBestMove: Sending go movetime ${movetime}`);
                 this.sendCommand(`go movetime ${movetime}`);
             }
         });

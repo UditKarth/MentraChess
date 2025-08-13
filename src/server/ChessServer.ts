@@ -914,14 +914,22 @@ export class ChessServer extends AppServer {
         let usedStockfish = false;
         let originalCurrentPlayer = state.currentPlayer;
 
+        console.log(`[DEBUG] makeAIMove: Starting AI move generation for session: ${sessionId}`);
+        console.log(`[DEBUG] makeAIMove: AI color: ${aiColor}, User color: ${state.userColor}`);
+        console.log(`[DEBUG] makeAIMove: Stockfish service available: ${!!this.stockfishService}`);
+        console.log(`[DEBUG] makeAIMove: Stockfish engine ready: ${this.stockfishService?.isEngineReady()}`);
+
         // --- Try Stockfish up to maxRetries ---
         if (this.stockfishService && this.stockfishService.isEngineReady()) {
             usedStockfish = true;
+            console.log(`[DEBUG] makeAIMove: Attempting Stockfish move generation`);
             while (attempt < maxRetries && !validMoveFound) {
                 attempt++;
+                console.log(`[DEBUG] makeAIMove: Stockfish attempt ${attempt}/${maxRetries}`);
                 try {
                     // Temporarily set currentPlayer to AI for FEN
                     state.currentPlayer = aiColor;
+                    console.log(`[DEBUG] makeAIMove: Current FEN: ${state.currentFEN}`);
                     const stockfishMove = await this.stockfishService.getBestMove(
                         state,
                         state.aiDifficulty || Difficulty.MEDIUM,
@@ -929,11 +937,14 @@ export class ChessServer extends AppServer {
                     );
                     state.currentPlayer = originalCurrentPlayer; // Restore
 
+                    console.log(`[DEBUG] makeAIMove: Stockfish returned move: ${JSON.stringify(stockfishMove)}`);
                     if (stockfishMove) {
                         const internalMove = stockfishMoveToInternal(stockfishMove, state.board);
+                        console.log(`[DEBUG] makeAIMove: Converted to internal move: ${JSON.stringify(internalMove)}`);
                         if (internalMove) {
                             // Validate move
                             const validation = validateMove(state.board, internalMove.source, internalMove.target, aiColor, state.castlingRights);
+                            console.log(`[DEBUG] makeAIMove: Move validation result: ${validation.isValid}, error: ${validation.error}`);
                             if (validation.isValid) {
                                 aiMove = {
                                     source: internalMove.source,
@@ -941,44 +952,61 @@ export class ChessServer extends AppServer {
                                     piece: internalMove.piece
                                 };
                                 validMoveFound = true;
+                                console.log(`[DEBUG] makeAIMove: Stockfish move validated successfully`);
                                 break;
                             } else {
                                 console.warn(`Stockfish suggested invalid move (attempt ${attempt}): ${internalMove.piece} from ${coordsToAlgebraic(internalMove.source)} to ${coordsToAlgebraic(internalMove.target)}: ${validation.error}`);
                             }
+                        } else {
+                            console.warn(`[DEBUG] makeAIMove: Failed to convert Stockfish move to internal format`);
                         }
+                    } else {
+                        console.warn(`[DEBUG] makeAIMove: Stockfish returned null move`);
                     }
                 } catch (err) {
-                    console.warn('Stockfish move failed:', err);
+                    console.warn(`[DEBUG] makeAIMove: Stockfish move failed:`, err);
                 }
             }
+        } else {
+            console.log(`[DEBUG] makeAIMove: Stockfish not available or not ready, skipping`);
         }
 
         // --- Fallback to simple AI if needed ---
         if (!validMoveFound) {
+            console.log(`[DEBUG] makeAIMove: Stockfish failed, falling back to simple AI`);
             attempt = 0;
             while (attempt < maxRetries && !validMoveFound) {
                 attempt++;
+                console.log(`[DEBUG] makeAIMove: Simple AI attempt ${attempt}/${maxRetries}`);
                 const simpleMove = this.generateSimpleAIMove(state, aiColor);
                 if (simpleMove) {
+                    console.log(`[DEBUG] makeAIMove: Simple AI suggested move: ${JSON.stringify(simpleMove)}`);
                     const validation = validateMove(state.board, simpleMove.source, simpleMove.target, aiColor, state.castlingRights);
+                    console.log(`[DEBUG] makeAIMove: Simple AI move validation: ${validation.isValid}, error: ${validation.error}`);
                     if (validation.isValid) {
                         aiMove = simpleMove;
                         validMoveFound = true;
+                        console.log(`[DEBUG] makeAIMove: Simple AI move validated successfully`);
                         break;
                     } else {
                         console.warn(`Simple AI suggested invalid move (attempt ${attempt}): ${simpleMove.piece} from ${coordsToAlgebraic(simpleMove.source)} to ${coordsToAlgebraic(simpleMove.target)}: ${validation.error}`);
                     }
+                } else {
+                    console.warn(`[DEBUG] makeAIMove: Simple AI returned null move`);
                 }
             }
         }
 
         // --- If no valid move found, inform user and switch turn ---
         if (!validMoveFound || !aiMove) {
+            console.log(`[DEBUG] makeAIMove: No valid move found after all attempts`);
             await this.updateBoardAndFeedback(sessionId, usedStockfish ? "AI couldn't find a valid move (Stockfish and fallback failed)" : "AI couldn't find a valid move");
             state.mode = SessionMode.USER_TURN;
             await this.promptUserMove(sessionId);
             return;
         }
+
+        console.log(`[DEBUG] makeAIMove: Executing AI move: ${aiMove.piece} from ${coordsToAlgebraic(aiMove.source)} to ${coordsToAlgebraic(aiMove.target)}`);
 
         // --- Execute the valid AI move ---
         const { updatedBoard, capturedPiece } = executeMove(state.board, aiMove.source, aiMove.target);
