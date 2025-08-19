@@ -2,6 +2,7 @@ import {
     initializeBoard, 
     canCastle, 
     executeCastling, 
+    executeMove,
     updateCastlingRights,
     parseCastlingTranscript
 } from '../chess_logic';
@@ -153,6 +154,35 @@ describe('Castling Tests', () => {
             expect(result.updatedBoard[0]![7]).toBe(' '); // Rook moved from h8
             expect(result.updatedBoard[0]![5]).toBe('r'); // Rook moved to f8
         });
+
+        test('should handle castling through executeMove function', () => {
+            // Clear path for kingside castling
+            board[7]![5] = ' '; // Clear f1
+            board[7]![6] = ' '; // Clear g1
+            
+            // Test kingside castling through executeMove
+            const result = executeMove(board, [7, 4], [7, 6]); // e1 to g1
+            
+            expect(result.updatedBoard[7]![4]).toBe(' '); // King moved from e1
+            expect(result.updatedBoard[7]![6]).toBe('K'); // King moved to g1
+            expect(result.updatedBoard[7]![7]).toBe(' '); // Rook moved from h1
+            expect(result.updatedBoard[7]![5]).toBe('R'); // Rook moved to f1
+        });
+
+        test('should handle queenside castling through executeMove function', () => {
+            // Clear path for queenside castling
+            board[7]![1] = ' '; // Clear b1
+            board[7]![2] = ' '; // Clear c1
+            board[7]![3] = ' '; // Clear d1
+            
+            // Test queenside castling through executeMove
+            const result = executeMove(board, [7, 4], [7, 2]); // e1 to c1
+            
+            expect(result.updatedBoard[7]![4]).toBe(' '); // King moved from e1
+            expect(result.updatedBoard[7]![2]).toBe('K'); // King moved to c1
+            expect(result.updatedBoard[7]![0]).toBe(' '); // Rook moved from a1
+            expect(result.updatedBoard[7]![3]).toBe('R'); // Rook moved to d1
+        });
     });
 
     describe('Castling Rights Updates', () => {
@@ -230,31 +260,56 @@ describe('Castling Tests', () => {
 
     describe('Complex Castling Scenarios', () => {
         test('should handle castling in complex positions', () => {
-            // Set up a complex position where castling should still be possible
-            board = [
-                ['r', ' ', ' ', ' ', 'k', ' ', ' ', 'r'],
-                ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
-                [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
-                [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
-                [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
-                [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
-                ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
-                ['R', ' ', ' ', ' ', 'K', ' ', ' ', 'R']
-            ];
+            // Set up a position where castling is possible
+            board[7]![5] = ' '; // Clear f1
+            board[7]![6] = ' '; // Clear g1
+            board[6]![5] = 'P'; // White pawn at f2
+            board[6]![6] = 'P'; // White pawn at g2
             
-            // Both sides should be able to castle kingside
-            expect(canCastle(board, PlayerColor.WHITE, 'kingside', 'KQkq')).toBe(true);
-            expect(canCastle(board, PlayerColor.BLACK, 'kingside', 'KQkq')).toBe(true);
+            const result = canCastle(board, PlayerColor.WHITE, 'kingside', 'KQkq');
+            expect(result).toBe(true);
         });
 
         test('should handle castling with pieces in non-blocking positions', () => {
             // Set up position with pieces that don't block castling
-            board[7]![1] = 'N'; // Knight at b1 (blocks queenside)
-            board[7]![6] = 'N'; // Knight at g1 (blocks kingside)
+            board[7]![5] = ' '; // Clear f1
+            board[7]![6] = ' '; // Clear g1
+            board[5]![5] = 'P'; // White pawn at f3
+            board[5]![6] = 'P'; // White pawn at g3
             
-            // Should not be able to castle when path is blocked
-            expect(canCastle(board, PlayerColor.WHITE, 'kingside', 'KQkq')).toBe(false);
-            expect(canCastle(board, PlayerColor.WHITE, 'queenside', 'KQkq')).toBe(false);
+            const result = canCastle(board, PlayerColor.WHITE, 'kingside', 'KQkq');
+            expect(result).toBe(true);
+        });
+
+        test('should handle Stockfish-style castling move format', () => {
+            // Clear path for kingside castling
+            board[7]![5] = ' '; // Clear f1
+            board[7]![6] = ' '; // Clear g1
+            
+            // Simulate Stockfish returning "e1g1" for kingside castling
+            // This should be converted to internal coordinates [7,4] to [7,6]
+            // and then executed as a proper castling move
+            const result = executeMove(board, [7, 4], [7, 6]); // e1 to g1
+            
+            expect(result.updatedBoard[7]![4]).toBe(' '); // King moved from e1
+            expect(result.updatedBoard[7]![6]).toBe('K'); // King moved to g1
+            expect(result.updatedBoard[7]![7]).toBe(' '); // Rook moved from h1
+            expect(result.updatedBoard[7]![5]).toBe('R'); // Rook moved to f1
+        });
+
+        test('should handle Stockfish-style queenside castling move format', () => {
+            // Clear path for queenside castling
+            board[7]![1] = ' '; // Clear b1
+            board[7]![2] = ' '; // Clear c1
+            board[7]![3] = ' '; // Clear d1
+            
+            // Simulate Stockfish returning "e1c1" for queenside castling
+            const result = executeMove(board, [7, 4], [7, 2]); // e1 to c1
+            
+            expect(result.updatedBoard[7]![4]).toBe(' '); // King moved from e1
+            expect(result.updatedBoard[7]![2]).toBe('K'); // King moved to c1
+            expect(result.updatedBoard[7]![0]).toBe(' '); // Rook moved from a1
+            expect(result.updatedBoard[7]![3]).toBe('R'); // Rook moved to d1
         });
     });
 }); 

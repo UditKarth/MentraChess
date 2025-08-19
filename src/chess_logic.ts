@@ -689,6 +689,18 @@ export function executeMove(board: Piece[][], source: Coordinates, target: Coord
         throw new Error('No piece at source square');
     }
 
+    // Check if this is a castling move
+    if (pieceToMove.toLowerCase() === 'k' && sourceRow === targetRow && Math.abs(targetCol - sourceCol) === 2) {
+        // This is a castling move - determine the side
+        const side = targetCol > sourceCol ? 'kingside' : 'queenside';
+        const player = pieceToMove === 'K' ? PlayerColor.WHITE : PlayerColor.BLACK;
+        
+        // Execute castling using the proper function
+        const castlingResult = executeCastling(newBoard, player, side);
+        return { updatedBoard: castlingResult.updatedBoard, capturedPiece: capturedPiece ?? ' ' };
+    }
+
+    // Regular move
     newBoard[targetRow]![targetCol] = pieceToMove;
     newBoard[sourceRow]![sourceCol] = ' '; // Empty the source square
 
@@ -699,7 +711,6 @@ export function executeMove(board: Piece[][], source: Coordinates, target: Coord
         newBoard[targetRow]![targetCol] = 'q';
     }
 
-    // TODO: Handle castling move updates (move rook as well)
     // TODO: Handle en passant capture (clear the captured pawn's square)
 
     return { updatedBoard: newBoard, capturedPiece: capturedPiece ?? ' ' };
