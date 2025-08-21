@@ -684,6 +684,7 @@ export class ChessServer extends AppServer {
 
         const { appSession, state } = gameSession;
         const userId = gameSession.info?.userId || '';
+        
         const command = GameModeCommandProcessor.parseCommand(transcript);
 
         console.log(`[GameMode] Processing command: ${command.type}`, command.params);
@@ -1082,8 +1083,16 @@ export class ChessServer extends AppServer {
             // Skip inputs that end with common incomplete words
             const incompleteEndings = ['hel', 'he', 'h', 'pl', 'p', 'roo', 'ro', 'r', 'kni', 'kni', 'kn', 'k'];
             const lowerInput = trimmedTranscript.toLowerCase();
-            if (incompleteEndings.some(ending => lowerInput.endsWith(ending))) {
-                console.log(`[Transcription] Skipping likely incomplete input: "${trimmedTranscript}"`);
+            
+            // Only check for incomplete endings if the input is actually incomplete
+            // Complete words like "help", "menu", "play", etc. should not be flagged as incomplete
+            const completeWords = ['help', 'menu', 'play', 'game', 'ai', 'computer', 'bot', 'friend', 'buddy', 'mate', 'opponent', 'match', 'find', 'get', 'search', 'quick', 'single', 'multi', 'player', 'mode', 'easy', 'medium', 'hard', 'accept', 'reject', 'cancel', 'back', 'stop', 'yes', 'no', 'okay', 'ok', 'what', 'how', 'commands', 'options', 'settings'];
+            
+            const isCompleteWord = completeWords.includes(lowerInput);
+            const matchingEnding = incompleteEndings.find(ending => lowerInput.endsWith(ending));
+            
+            if (matchingEnding && !isCompleteWord) {
+                console.log(`[Transcription] Skipping likely incomplete input: "${trimmedTranscript}" (ends with "${matchingEnding}")`);
                 return;
             }
 

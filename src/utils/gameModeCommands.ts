@@ -51,7 +51,8 @@ export class GameModeCommandProcessor {
    * Parse voice command for game mode selection
    */
   static parseCommand(text: string): GameModeCommand {
-    const cleanText = text.toLowerCase().trim();
+    // Clean the text by removing common punctuation and trimming
+    const cleanText = text.toLowerCase().trim().replace(/^[.!?]+|[.!?]+$/g, '');
     const originalText = text.trim();
     
     // Check each command pattern in order
@@ -159,13 +160,13 @@ export class GameModeCommandProcessor {
     }
     
     // Don't allow common incomplete words
-    const incompleteWords = ['hel', 'he', 'h', 'pl', 'p', 'roo', 'ro', 'r', 'kni', 'kni', 'kn', 'k', 'que', 'qu', 'q', 'bi', 'b', 'pa', 'p'];
+    const incompleteWords = ['hel', 'he', 'h', 'pl', 'p', 'roo', 'ro', 'r', 'kni', 'kni', 'kn', 'k', 'que', 'qu', 'q', 'bi', 'b', 'pa', 'p', 'men', 'me', 'm'];
     if (incompleteWords.includes(cleanName)) {
       return false;
     }
     
     // Don't allow if it starts with common incomplete prefixes
-    const incompletePrefixes = ['hel', 'he', 'pl', 'roo', 'kni', 'que', 'bi', 'pa'];
+    const incompletePrefixes = ['hel', 'he', 'pl', 'roo', 'kni', 'que', 'bi', 'pa', 'men', 'me'];
     if (incompletePrefixes.some(prefix => cleanName.startsWith(prefix) && cleanName !== prefix)) {
       return false;
     }
