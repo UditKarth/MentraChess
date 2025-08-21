@@ -13,46 +13,61 @@ export interface GameModeCommand {
 }
 
 export class GameModeCommandProcessor {
-  private static readonly COMMANDS = {
+  private static readonly COMMANDS = [
     // AI Game commands
-    AI_GAME: /^(play\s+)?(against\s+)?(ai|computer|bot)$/i,
-    AI_DIFFICULTY: /^(play\s+)?(against\s+)?(ai|computer|bot)\s+(easy|medium|hard)$/i,
+    ['AI_GAME', /^(play\s+)?(against\s+)?(ai|computer|bot)$/i],
+    ['AI_DIFFICULTY', /^(play\s+)?(against\s+)?(ai|computer|bot)\s+(easy|medium|hard)$/i],
     
     // Friend Game commands
-    FRIEND_GAME: /^(play\s+)?(against\s+)?(friend|buddy|mate)$/i,
+    ['FRIEND_GAME', /^(play\s+)?(against\s+)?(friend|buddy|mate)$/i],
     
     // Random Matchmaking commands
-    RANDOM_MATCH: /^(find|get|search\s+for)\s+(opponent|match|game)$/i,
-    RANDOM_MATCH_QUICK: /^(quick\s+)?(match|game|play)$/i,
+    ['RANDOM_MATCH', /^(find|get|search\s+for)\s+(opponent|match|game)$/i],
+    ['RANDOM_MATCH_QUICK', /^(quick\s+)?(match|game|play)$/i],
     
-    // Menu and Help commands
-    SHOW_MENU: /^(menu|options|settings)$/i,
-    HELP: /^(help|what\s+can\s+i\s+do|how\s+to\s+play|commands)$/i,
+    // Menu and Help commands (must come before FRIEND_NAMED)
+    ['SHOW_MENU', /^(menu|options|settings)$/i],
+    ['HELP', /^(help|what\s+can\s+i\s+do|how\s+to\s+play|commands)$/i],
+    
+    // Special cases for "play against help/menu" - these should be treated as help/menu commands
+    ['HELP_PLAY_AGAINST', /^(play\s+)?(against\s+)?(help)$/i],
+    ['MENU_PLAY_AGAINST', /^(play\s+)?(against\s+)?(menu)$/i],
     
     // Alternative AI commands
-    SINGLE_PLAYER: /^(single\s+)?(player|mode)$/i,
-    MULTIPLAYER: /^(multi\s+)?(player|mode)$/i,
-    MULTIPLAYER_EXACT: /^multiplayer$/i,
+    ['SINGLE_PLAYER', /^(single\s+)?(player|mode)$/i],
+    ['MULTIPLAYER', /^(multi\s+)?(player|mode)$/i],
+    ['MULTIPLAYER_EXACT', /^multiplayer$/i],
     
     // Challenge response commands
-    ACCEPT: /^(accept|yes|okay|ok)$/i,
-    REJECT: /^(reject|no|decline)$/i,
-    CANCEL: /^(cancel|back|stop)$/i,
+    ['ACCEPT', /^(accept|yes|okay|ok)$/i],
+    ['REJECT', /^(reject|no|decline)$/i],
+    ['CANCEL', /^(cancel|back|stop)$/i],
     
-    // Friend name patterns (must come after other patterns)
-    FRIEND_NAMED: /^(play\s+)?(against\s+)?([a-zA-Z]+)$/i,
-  };
+    // Friend name patterns (must come LAST to avoid matching command words)
+    ['FRIEND_NAMED', /^(play\s+)?(against\s+)?([a-zA-Z]+)$/i],
+  ] as const;
   
   /**
    * Parse voice command for game mode selection
    */
   static parseCommand(text: string): GameModeCommand {
     const cleanText = text.toLowerCase().trim();
+    const originalText = text.trim();
     
-    // Check each command pattern
-    for (const [commandType, pattern] of Object.entries(this.COMMANDS)) {
+    // Check each command pattern in order
+    for (const [commandType, pattern] of this.COMMANDS) {
       const match = cleanText.match(pattern);
       if (match) {
+        // Special handling for FRIEND_NAMED to validate the friend name
+        if (commandType === 'FRIEND_NAMED') {
+          const friendName = match[3];
+          if (friendName && this.isValidFriendName(friendName)) {
+            // Use original text to preserve case for friend names
+            return this.processMatch(commandType, match, originalText);
+          }
+          // If friend name is not valid, continue to next pattern
+          continue;
+        }
         return this.processMatch(commandType, match, cleanText);
       }
     }
@@ -84,6 +99,12 @@ export class GameModeCommandProcessor {
       case 'HELP':
         return { type: 'help' };
         
+      case 'HELP_PLAY_AGAINST':
+        return { type: 'help' };
+        
+      case 'MENU_PLAY_AGAINST':
+        return { type: 'show_menu' };
+        
       case 'SINGLE_PLAYER':
         return { type: 'ai_game' };
         
@@ -101,7 +122,9 @@ export class GameModeCommandProcessor {
         return { type: 'cancel' };
         
       case 'FRIEND_NAMED':
-        const friendName = match[3];
+        // Extract friend name from original text to preserve case
+        const friendNameMatch = originalText.match(/^(play\s+)?(against\s+)?(.+)$/i);
+        const friendName = friendNameMatch ? friendNameMatch[3] : match[3];
         // Add stricter validation for friend names
         if (friendName && friendName.length >= 3 && this.isValidFriendName(friendName)) {
           return { 
