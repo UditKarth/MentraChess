@@ -13,7 +13,14 @@ export class MatchmakingServiceImpl implements MatchmakingService {
   private gameParticipants: Map<string, Set<string>> = new Map();
   private userNicknames: Map<string, string> = new Map();
   private onlineUsers: Set<string> = new Set();
-  private cleanupInterval?: NodeJS.Timeout | undefined;
+  private cleanupInterval: NodeJS.Timeout | null = null;
+  
+  // Memory management constants
+  private readonly MAX_PENDING_CHALLENGES = 1000;
+  private readonly MAX_MATCHMAKING_QUEUE = 500;
+  private readonly MAX_ACTIVE_GAMES = 200;
+  private readonly MAX_ONLINE_USERS = 2000;
+  private readonly MAX_USER_NICKNAMES = 5000;
   
   constructor(private networkService: NetworkService) {
     this.setupPeriodicCleanup();
@@ -30,6 +37,16 @@ export class MatchmakingServiceImpl implements MatchmakingService {
     const activeGame = await this.getActiveGames(toUserId);
     if (activeGame.length > 0) {
       throw new Error('User is already in a game');
+    }
+    
+    // Check pending challenges limit
+    if (this.pendingChallenges.size >= this.MAX_PENDING_CHALLENGES) {
+      console.warn(`[MatchmakingServiceImpl] Pending challenges limit reached (${this.MAX_PENDING_CHALLENGES}), cleaning up expired challenges`);
+      this.cleanupExpiredChallenges();
+      
+      if (this.pendingChallenges.size >= this.MAX_PENDING_CHALLENGES) {
+        throw new Error('Too many pending challenges, please try again later');
+      }
     }
     
     const challenge: GameChallenge = {
@@ -102,6 +119,16 @@ export class MatchmakingServiceImpl implements MatchmakingService {
     // Remove from any existing queue entry
     this.matchmakingQueue.delete(userId);
     
+    // Check matchmaking queue limit
+    if (this.matchmakingQueue.size >= this.MAX_MATCHMAKING_QUEUE) {
+      console.warn(`[MatchmakingServiceImpl] Matchmaking queue limit reached (${this.MAX_MATCHMAKING_QUEUE}), cleaning up inactive entries`);
+      this.cleanupInactiveQueueEntries();
+      
+      if (this.matchmakingQueue.size >= this.MAX_MATCHMAKING_QUEUE) {
+        throw new Error('Matchmaking queue is full, please try again later');
+      }
+    }
+    
     // Add to matchmaking queue
     const queueEntry: MatchmakingQueueEntry = {
       userId,
@@ -126,6 +153,12 @@ export class MatchmakingServiceImpl implements MatchmakingService {
   }
   
   async createGame(player1Id: string, player2Id: string): Promise<string> {
+    // Check active games limit
+    if (this.activeGames.size >= this.MAX_ACTIVE_GAMES) {
+      console.warn(`[MatchmakingServiceImpl] Active games limit reached (${this.MAX_ACTIVE_GAMES})`);
+      throw new Error('Too many active games, please try again later');
+    }
+    
     const gameId = `game_${Date.now()}_${uuidv4().substring(0, 8)}`;
     
     // Randomly assign colors
@@ -228,6 +261,16 @@ export class MatchmakingServiceImpl implements MatchmakingService {
   }
   
   async setUserNickname(userId: string, nickname: string): Promise<void> {
+    // Check user nicknames limit
+    if (this.userNicknames.size >= this.MAX_USER_NICKNAMES) {
+      console.warn(`[MatchmakingServiceImpl] User nicknames limit reached (${this.MAX_USER_NICKNAMES}), cleaning up old entries`);
+      // Remove oldest entries to make room
+      const entries = Array.from(this.userNicknames.entries());
+      const toRemove = entries.slice(0, Math.floor(this.MAX_USER_NICKNAMES * 0.2)); // Remove 20% of oldest entries
+      for (const [key] of toRemove) {
+        this.userNicknames.delete(key);
+      }
+    }
     this.userNicknames.set(userId, nickname);
     this.networkService.setUserNickname(userId, nickname);
   }
@@ -321,6 +364,11 @@ export class MatchmakingServiceImpl implements MatchmakingService {
   // Public utility methods
   
   public addOnlineUser(userId: string): void {
+    // Check online users limit
+    if (this.onlineUsers.size >= this.MAX_ONLINE_USERS) {
+      console.warn(`[MatchmakingServiceImpl] Online users limit reached (${this.MAX_ONLINE_USERS})`);
+      return;
+    }
     this.onlineUsers.add(userId);
   }
   
@@ -345,7 +393,7 @@ export class MatchmakingServiceImpl implements MatchmakingService {
   public stop(): void {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
-      this.cleanupInterval = undefined;
+      this.cleanupInterval = null;
     }
     
     // Clear all data structures

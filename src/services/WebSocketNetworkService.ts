@@ -13,6 +13,14 @@ export class WebSocketNetworkService implements NetworkService {
   private gameParticipants: Map<string, Set<string>> = new Map();
   private eventHandlers: Map<string, Array<(data: any) => void>> = new Map();
   private userNicknames: Map<string, string> = new Map();
+  private cleanupInterval: NodeJS.Timeout | null = null;
+  
+  // Memory management constants
+  private readonly MAX_CONNECTIONS = 1000;
+  private readonly MAX_QUEUE_SIZE = 50; // Maximum messages per user queue
+  private readonly MAX_QUEUE_AGE = 5 * 60 * 1000; // 5 minutes
+  private readonly MAX_GAME_PARTICIPANTS = 100;
+  private readonly MAX_EVENT_HANDLERS = 20; // Maximum handlers per event type
   
   constructor(portOrServer?: number | Server) {
     if (typeof portOrServer === 'number') {
@@ -29,15 +37,23 @@ export class WebSocketNetworkService implements NetworkService {
       console.log(`[WebSocketNetworkService] WebSocket server started on default port 8080`);
     }
     this.setupWebSocketServer();
+    this.setupPeriodicCleanup();
   }
   
   private setupWebSocketServer(): void {
     this.wss.on('connection', (ws: WebSocket, req: any) => {
+      // Check connection limit
+      if (this.connections.size >= this.MAX_CONNECTIONS) {
+        console.warn(`[WebSocketNetworkService] Connection limit reached (${this.MAX_CONNECTIONS}), rejecting new connection`);
+        ws.close(1013, 'Server overloaded'); // Try again later
+        return;
+      }
+      
       const userId = this.extractUserIdFromRequest(req);
       if (userId) {
         this.connections.set(userId, ws);
         this.setupMessageHandlers(ws, userId);
-        console.log(`[WebSocketNetworkService] User ${userId} connected`);
+        console.log(`[WebSocketNetworkService] User ${userId} connected (${this.connections.size}/${this.MAX_CONNECTIONS})`);
         
         // Send queued messages if any
         this.sendQueuedMessages(userId);
@@ -50,6 +66,40 @@ export class WebSocketNetworkService implements NetworkService {
     this.wss.on('error', (error) => {
       console.error('[WebSocketNetworkService] WebSocket server error:', error);
     });
+  }
+  
+  private setupPeriodicCleanup(): void {
+    // Clean up old message queues every 2 minutes
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupMessageQueues();
+    }, 2 * 60 * 1000);
+  }
+  
+  private cleanupMessageQueues(): void {
+    const now = Date.now();
+    let cleanedQueues = 0;
+    let cleanedMessages = 0;
+    
+    for (const [userId, queue] of this.messageQueues.entries()) {
+      // Remove old messages
+      const originalLength = queue.length;
+      const filteredQueue = queue.filter(msg => (now - msg.timestamp) < this.MAX_QUEUE_AGE);
+      
+      if (filteredQueue.length !== originalLength) {
+        this.messageQueues.set(userId, filteredQueue);
+        cleanedMessages += (originalLength - filteredQueue.length);
+      }
+      
+      // Remove empty queues
+      if (filteredQueue.length === 0) {
+        this.messageQueues.delete(userId);
+        cleanedQueues++;
+      }
+    }
+    
+    if (cleanedQueues > 0 || cleanedMessages > 0) {
+      console.log(`[WebSocketNetworkService] Cleaned up ${cleanedQueues} empty queues and ${cleanedMessages} old messages`);
+    }
   }
   
   private extractUserIdFromRequest(req: any): string | null {
@@ -86,7 +136,7 @@ export class WebSocketNetworkService implements NetworkService {
     ws.on('close', () => {
       this.connections.delete(userId);
       this.handleUserDisconnection(userId);
-      console.log(`[WebSocketNetworkService] User ${userId} disconnected`);
+      console.log(`[WebSocketNetworkService] User ${userId} disconnected (${this.connections.size}/${this.MAX_CONNECTIONS})`);
     });
     
     ws.on('error', (error) => {
@@ -97,7 +147,10 @@ export class WebSocketNetworkService implements NetworkService {
   }
   
   private handleIncomingMessage(message: NetworkMessage): void {
-    console.log(`[WebSocketNetworkService] Received message: ${message.type} from ${message.fromUserId}`);
+    // Limit logging in production
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[WebSocketNetworkService] Received message: ${message.type} from ${message.fromUserId}`);
+    }
     
     // Emit event for handlers to process
     this.emit(message.type, message);
@@ -437,7 +490,16 @@ export class WebSocketNetworkService implements NetworkService {
     if (!this.eventHandlers.has(event)) {
       this.eventHandlers.set(event, []);
     }
-    this.eventHandlers.get(event)!.push(handler);
+    
+    const handlers = this.eventHandlers.get(event)!;
+    
+    // Limit number of handlers per event to prevent memory leaks
+    if (handlers.length >= this.MAX_EVENT_HANDLERS) {
+      console.warn(`[WebSocketNetworkService] Too many handlers for event ${event}, removing oldest`);
+      handlers.shift(); // Remove oldest handler
+    }
+    
+    handlers.push(handler);
   }
   
   off(event: string, handler: (data: any) => void): void {
@@ -482,7 +544,16 @@ export class WebSocketNetworkService implements NetworkService {
     if (!this.messageQueues.has(userId)) {
       this.messageQueues.set(userId, []);
     }
-    this.messageQueues.get(userId)!.push(message);
+    
+    const queue = this.messageQueues.get(userId)!;
+    
+    // Limit queue size to prevent memory leaks
+    if (queue.length >= this.MAX_QUEUE_SIZE) {
+      console.warn(`[WebSocketNetworkService] Message queue full for user ${userId}, dropping oldest message`);
+      queue.shift(); // Remove oldest message
+    }
+    
+    queue.push(message);
   }
   
   // Utility methods for game management
@@ -490,7 +561,16 @@ export class WebSocketNetworkService implements NetworkService {
     if (!this.gameParticipants.has(gameId)) {
       this.gameParticipants.set(gameId, new Set());
     }
-    this.gameParticipants.get(gameId)!.add(userId);
+    
+    const participants = this.gameParticipants.get(gameId)!;
+    
+    // Limit participants per game
+    if (participants.size >= this.MAX_GAME_PARTICIPANTS) {
+      console.warn(`[WebSocketNetworkService] Too many participants for game ${gameId}`);
+      return;
+    }
+    
+    participants.add(userId);
   }
   
   removeGameParticipant(gameId: string, userId: string): void {
@@ -567,6 +647,11 @@ export class WebSocketNetworkService implements NetworkService {
   
   // Cleanup method
   stop(): Promise<void> {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+
     return new Promise((resolve) => {
       // Close all individual connections first
       for (const [userId, ws] of this.connections.entries()) {

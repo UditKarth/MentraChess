@@ -40,6 +40,7 @@ import { WebSocketNetworkService } from '../services/WebSocketNetworkService';
 import { MatchmakingService } from '../services/MatchmakingService';
 import { MatchmakingServiceImpl } from '../services/MatchmakingServiceImpl';
 import { MultiplayerGameManager } from '../services/MultiplayerGameManager';
+import { memoryMonitor } from '../utils/memoryMonitor';
 
 export class ChessServer extends AppServer {
     protected sessionManager: SessionManager;
@@ -102,6 +103,9 @@ export class ChessServer extends AppServer {
         
         // Set up periodic board cache cleanup
         this.setupPeriodicCleanup();
+        
+        // Start memory monitoring
+        memoryMonitor.startMonitoring();
     }
 
     protected async onSession(session: AppSession, sessionId: string, userId: string): Promise<void> {
@@ -414,30 +418,45 @@ export class ChessServer extends AppServer {
     private async updateBoardAndFeedback(sessionId: string, feedback: string) {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) {
-            console.log(`[DEBUG] updateBoardAndFeedback: No game session found for sessionId: ${sessionId}`);
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[DEBUG] updateBoardAndFeedback: No game session found for sessionId: ${sessionId}`);
+            }
             return;
         }
         
-        console.log(`[DEBUG] updateBoardAndFeedback: Found game session for sessionId: ${sessionId}`);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(`[DEBUG] updateBoardAndFeedback: Found game session for sessionId: ${sessionId}`);
+        }
         const { appSession, state } = gameSession;
         
         try {
-            console.log(`[DEBUG] updateBoardAndFeedback: Getting cached board text`);
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[DEBUG] updateBoardAndFeedback: Getting cached board text`);
+            }
             // Use cached board text for better performance
             const boardText = this.getCachedBoardText(sessionId, state, appSession);
-            console.log(`[DEBUG] updateBoardAndFeedback: Board text length: ${boardText.length}`);
-            console.log(`[DEBUG] updateBoardAndFeedback: Board text preview: ${boardText.substring(0, 100)}...`);
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[DEBUG] updateBoardAndFeedback: Board text length: ${boardText.length}`);
+            }
             
-            console.log(`[DEBUG] updateBoardAndFeedback: Calling showDoubleTextWall`);
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[DEBUG] updateBoardAndFeedback: Calling showDoubleTextWall`);
+            }
             await appSession.layouts.showDoubleTextWall(boardText, feedback);
-            console.log(`[DEBUG] updateBoardAndFeedback: showDoubleTextWall completed successfully`);
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[DEBUG] updateBoardAndFeedback: showDoubleTextWall completed successfully`);
+            }
         } catch (error) {
             console.error(`[DEBUG] updateBoardAndFeedback: Error updating board and feedback:`, error);
             // Fallback: try to show just the feedback
             try {
-                console.log(`[DEBUG] updateBoardAndFeedback: Trying fallback with showTextWall`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`[DEBUG] updateBoardAndFeedback: Trying fallback with showTextWall`);
+                }
                 await appSession.layouts.showTextWall(feedback, { durationMs: 3000 });
-                console.log(`[DEBUG] updateBoardAndFeedback: Fallback showTextWall completed`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`[DEBUG] updateBoardAndFeedback: Fallback showTextWall completed`);
+                }
             } catch (fallbackError) {
                 console.error(`[DEBUG] updateBoardAndFeedback: Fallback layout also failed:`, fallbackError);
             }
@@ -466,7 +485,9 @@ export class ChessServer extends AppServer {
     }
 
     private getCachedBoardText(sessionId: string, state: SessionState, appSession: AppSession): string {
-        console.log(`[DEBUG] getCachedBoardText: Starting for sessionId: ${sessionId}`);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(`[DEBUG] getCachedBoardText: Starting for sessionId: ${sessionId}`);
+        }
         const now = Date.now();
         const cacheKey = `${sessionId}_${state.currentFEN}`;
         const cached = this.boardCache.get(cacheKey);
@@ -474,21 +495,28 @@ export class ChessServer extends AppServer {
         // Get user preferences from settings (cache this too if needed)
         const useUnicodeSetting = appSession.settings.get<string>('use_unicode', 'true');
         const useUnicode = useUnicodeSetting === 'true' || useUnicodeSetting === 'TRUE' || useUnicodeSetting === '1';
-        console.log(`[DEBUG] getCachedBoardText: useUnicode setting: ${useUnicodeSetting}, resolved: ${useUnicode}`);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(`[DEBUG] getCachedBoardText: useUnicode setting: ${useUnicodeSetting}, resolved: ${useUnicode}`);
+        }
         
         // Check if we have a valid cached version
         if (cached && 
             cached.useUnicode === useUnicode && 
             (now - cached.timestamp) < this.BOARD_CACHE_DURATION) {
-            console.log(`[DEBUG] getCachedBoardText: Using cached board text, length: ${cached.boardText.length}`);
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[DEBUG] getCachedBoardText: Using cached board text, length: ${cached.boardText.length}`);
+            }
             return cached.boardText;
         }
         
-        console.log(`[DEBUG] getCachedBoardText: Generating new board text`);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(`[DEBUG] getCachedBoardText: Generating new board text`);
+        }
         // Generate new board text
         const boardText = renderBoardString(state, { useUnicode });
-        console.log(`[DEBUG] getCachedBoardText: Generated board text length: ${boardText.length}`);
-        console.log(`[DEBUG] getCachedBoardText: Board text preview: ${boardText.substring(0, 100)}...`);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(`[DEBUG] getCachedBoardText: Generated board text length: ${boardText.length}`);
+        }
         
         // Cache the result
         this.boardCache.set(cacheKey, {
@@ -506,7 +534,27 @@ export class ChessServer extends AppServer {
     private cleanupBoardCache(): void {
         const now = Date.now();
         const maxAge = this.BOARD_CACHE_DURATION * 2; // Keep entries for 2x cache duration
+        const maxCacheSize = 1000; // Maximum number of cached boards
         
+        // If cache is too large, remove oldest entries
+        if (this.boardCache.size > maxCacheSize) {
+            const entries = Array.from(this.boardCache.entries());
+            entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+            
+            // Remove oldest entries to get back to 80% of max size
+            const targetSize = Math.floor(maxCacheSize * 0.8);
+            const toRemove = entries.slice(0, entries.length - targetSize);
+            
+            for (const [key] of toRemove) {
+                this.boardCache.delete(key);
+            }
+            
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[ChessServer] Board cache size limit reached, removed ${toRemove.length} oldest entries`);
+            }
+        }
+        
+        // Remove expired entries
         for (const [key, value] of this.boardCache.entries()) {
             if ((now - value.timestamp) > maxAge) {
                 this.boardCache.delete(key);
@@ -1730,12 +1778,17 @@ export class ChessServer extends AppServer {
         activeSessions: number;
         boardCacheSize: number;
         totalMemoryUsage: number;
+        memoryHealth: string;
+        memoryDetails: any;
     } {
         const memUsage = process.memoryUsage();
+        const memoryDetails = memoryMonitor.getMemoryStats();
         return {
             activeSessions: this.sessionManager.getActiveSessionsCount(),
             boardCacheSize: this.boardCache.size,
-            totalMemoryUsage: Math.round(memUsage.heapUsed / 1024 / 1024) // MB
+            totalMemoryUsage: Math.round(memUsage.heapUsed / 1024 / 1024), // MB
+            memoryHealth: memoryMonitor.getMemoryHealthStatus(),
+            memoryDetails
         };
     }
 
@@ -1770,6 +1823,9 @@ export class ChessServer extends AppServer {
 
     public async stop(): Promise<void> {
         console.log('[ChessServer] Stopping chess server...');
+        
+        // Stop memory monitoring
+        memoryMonitor.stopMonitoring();
         
         // Stop all active sessions properly
         const sessionIds = this.sessionManager.getAllSessionIds();
@@ -1810,6 +1866,9 @@ export class ChessServer extends AppServer {
     public async cleanupForTests(): Promise<void> {
         console.log('[ChessServer] Cleaning up for tests...');
         
+        // Stop memory monitoring
+        memoryMonitor.stopMonitoring();
+        
         // Stop all active sessions properly
         const sessionIds = this.sessionManager.getAllSessionIds();
         for (const sessionId of sessionIds) {
@@ -1833,7 +1892,7 @@ export class ChessServer extends AppServer {
         // Stop WebSocket server
         if (this.networkService) {
             try {
-                this.networkService.stop();
+                await this.networkService.stop();
                 console.log('[ChessServer] Network service stopped for tests');
             } catch (error) {
                 console.error('[ChessServer] Error stopping network service:', error);

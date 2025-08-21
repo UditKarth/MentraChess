@@ -16,6 +16,7 @@ export class StockfishService {
     private isInitialized: boolean = false;
     private currentRequest: any = null;
     private buffer: string = '';
+    private lastBestMove: string | null = null;
 
     constructor() {
         this.initializeStockfish();
@@ -29,7 +30,9 @@ export class StockfishService {
             
             this.stockfish.stdout.on('data', (data: Buffer) => {
                 const message = data.toString();
-                console.log(`📤 Stockfish stdout: ${message.trim()}`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`📤 Stockfish stdout: ${message.trim()}`);
+                }
                 this.handleStockfishMessage(message);
             });
             
@@ -82,23 +85,28 @@ export class StockfishService {
     }
 
     private handleStockfishMessage(message: string): void {
-        this.buffer += message;
-        let lines = this.buffer.split('\n');
-        this.buffer = lines.pop() || '';
+        const lines = message.split('\n').filter(line => line.trim() !== '');
         
         for (const line of lines) {
-            console.log(`[DEBUG] StockfishService.handleStockfishMessage: Processing line: "${line}"`);
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[DEBUG] StockfishService.handleStockfishMessage: Processing line: "${line}"`);
+            }
             
             if (line === 'readyok') {
                 this.isReady = true;
-                this.isInitialized = true;
-                console.log('✅ Stockfish engine ready');
+                console.log('✅ Stockfish engine is ready');
             } else if (line.startsWith('bestmove')) {
-                console.log(`[DEBUG] StockfishService.handleStockfishMessage: Received bestmove: ${line}`);
-                this.handleBestMove(line);
-            } else if (line.startsWith('info')) {
-                // console.log(`[DEBUG] StockfishService.handleStockfishMessage: Received info: ${line}`);
-                this.handleInfo(line);
+                // Parse best move response
+                const parts = line.split(' ');
+                if (parts.length >= 2) {
+                    this.lastBestMove = parts[1] || null;
+                    console.log(`🎯 Stockfish best move: ${this.lastBestMove}`);
+                }
+            } else if (line.startsWith('info') && line.includes('score')) {
+                // Parse evaluation info - simplified for now
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`[DEBUG] StockfishService.handleStockfishMessage: Evaluation info: ${line}`);
+                }
             }
         }
     }
