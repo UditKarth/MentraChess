@@ -52,9 +52,9 @@ export class MatchmakingStatus {
     const statusData: MatchmakingStatusData = {
       status: 'searching',
       searchTime,
-      queuePosition: queuePosition || undefined,
-      totalPlayersInQueue: totalPlayersInQueue || undefined,
-      estimatedWaitTime: estimatedWaitTime || undefined,
+      queuePosition: queuePosition || 0,
+      totalPlayersInQueue: totalPlayersInQueue || 0,
+      estimatedWaitTime: estimatedWaitTime || 0,
       preferences: {} // This would be maintained from the start
     };
 

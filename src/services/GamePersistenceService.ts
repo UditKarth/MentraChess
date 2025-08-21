@@ -9,8 +9,8 @@ export interface GameStateData {
   gameStartTime: Date;
   lastMoveTime: Date;
   gameEndTime?: Date;
-  gameResult?: 'white_win' | 'black_win' | 'draw' | 'resignation';
-  winner?: string;
+  gameResult?: 'white_win' | 'black_win' | 'draw' | 'resignation' | undefined;
+  winner?: string | undefined;
 }
 
 export interface GameRecoveryData {
@@ -18,7 +18,7 @@ export interface GameRecoveryData {
   opponentId: string;
   playerColor: PlayerColor;
   gameState: SessionState;
-  lastMove?: GameMove;
+  lastMove?: GameMove | undefined;
   canResume: boolean;
 }
 
@@ -105,7 +105,7 @@ export class GamePersistenceService {
       if (gameData) {
         gameData.gameEndTime = new Date();
         gameData.gameResult = result;
-        gameData.winner = winner || undefined;
+        gameData.winner = winner;
         
         // Create history entry
         await this.createGameHistoryEntry(gameData);
@@ -126,7 +126,7 @@ export class GamePersistenceService {
       const userGameIds = this.userGames.get(userId) || new Set();
       const recoverableGames: GameRecoveryData[] = [];
 
-      for (const gameId of userGameIds) {
+      for (const gameId of Array.from(userGameIds)) {
         const gameData = this.gameStates.get(gameId);
         if (gameData && !gameData.gameEndTime) {
           // Check if game is recent enough to recover (within last 24 hours)
@@ -141,7 +141,7 @@ export class GamePersistenceService {
               opponentId,
               playerColor,
               gameState: gameData.currentState,
-              lastMove: gameData.moveHistory[gameData.moveHistory.length - 1] || undefined,
+              lastMove: gameData.moveHistory[gameData.moveHistory.length - 1],
               canResume: true
             });
           }
@@ -188,7 +188,7 @@ export class GamePersistenceService {
         opponentId,
         playerColor,
         gameState: gameData.currentState,
-        lastMove: gameData.moveHistory[gameData.moveHistory.length - 1] || undefined,
+        lastMove: gameData.moveHistory[gameData.moveHistory.length - 1],
         canResume: true
       };
 
@@ -265,7 +265,7 @@ export class GamePersistenceService {
         moveHistory: gameData.moveHistory || [],
         gameStartTime: new Date(gameData.gameStartTime),
         lastMoveTime: new Date(gameData.gameStartTime),
-        gameEndTime: gameData.gameEndTime ? new Date(gameData.gameEndTime) : undefined,
+        gameEndTime: gameData.gameEndTime ? new Date(gameData.gameEndTime) : new Date(),
         gameResult: gameData.gameResult,
         winner: gameData.winner
       };
@@ -288,7 +288,7 @@ export class GamePersistenceService {
       const cutoffDate = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
       let cleanedCount = 0;
 
-      for (const [gameId, gameData] of this.gameStates.entries()) {
+      for (const [gameId, gameData] of Array.from(this.gameStates.entries())) {
         const lastActivity = gameData.gameEndTime || gameData.lastMoveTime;
         if (lastActivity < cutoffDate) {
           this.gameStates.delete(gameId);
@@ -319,7 +319,7 @@ export class GamePersistenceService {
    * Remove game from all users
    */
   private removeGameFromUsers(gameId: string): void {
-    for (const [userId, gameIds] of this.userGames.entries()) {
+    for (const [userId, gameIds] of Array.from(this.userGames.entries())) {
       gameIds.delete(gameId);
       if (gameIds.size === 0) {
         this.userGames.delete(userId);

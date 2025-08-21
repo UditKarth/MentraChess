@@ -5,7 +5,7 @@ export interface DashboardData {
   gameStatus: string;
   opponentInfo: {
     name: string;
-    rating?: number;
+    rating?: number | undefined;
     connectionStatus: 'online' | 'offline' | 'disconnected';
   };
   gameStats: {
@@ -67,7 +67,7 @@ export class MultiplayerDashboard {
       gameStatus: this.getGameStatus(state, isMyTurn),
       opponentInfo: {
         name: opponentNickname,
-        rating: this.getOpponentRating(opponentId) || undefined,
+        rating: this.getOpponentRating(opponentId),
         connectionStatus: this.getConnectionStatus(state)
       },
       gameStats: {

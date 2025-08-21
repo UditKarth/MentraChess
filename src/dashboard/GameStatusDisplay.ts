@@ -14,7 +14,7 @@ export interface GameStatusData {
     to: string;
     piece: string;
     algebraic: string;
-  };
+  } | undefined;
   capturedPieces: {
     white: string[];
     black: string[];
@@ -57,7 +57,7 @@ export class GameStatusDisplay {
       lastMove: state.lastOpponentMove ? {
         from: Array.isArray(state.lastOpponentMove.from) ? `${state.lastOpponentMove.from[0]},${state.lastOpponentMove.from[1]}` : state.lastOpponentMove.from,
         to: Array.isArray(state.lastOpponentMove.to) ? `${state.lastOpponentMove.to[0]},${state.lastOpponentMove.to[1]}` : state.lastOpponentMove.to,
-        piece: state.lastOpponentMove.piece,
+        piece: String(state.lastOpponentMove.piece),
         algebraic: state.lastOpponentMove.algebraic || `${state.lastOpponentMove.from}-${state.lastOpponentMove.to}`
       } : undefined,
       capturedPieces: {

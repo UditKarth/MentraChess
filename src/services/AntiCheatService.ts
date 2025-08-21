@@ -136,8 +136,8 @@ export class AntiCheatService {
     }
 
     // Check if coordinates are within board bounds
-    const fromCoords = this.parseCoordinates(move.from);
-    const toCoords = this.parseCoordinates(move.to);
+    const fromCoords = move.from;
+    const toCoords = move.to;
     
     if (!fromCoords || !toCoords) return false;
     
@@ -165,7 +165,7 @@ export class AntiCheatService {
     if (square.length !== 2) return null;
     
     const file = square.charCodeAt(0) - 'a'.charCodeAt(0);
-    const rank = parseInt(square[1]) - 1;
+    const rank = parseInt(square[1] || '0') - 1;
     
     if (file < 0 || file > 7 || rank < 0 || rank > 7) return null;
     
@@ -204,7 +204,7 @@ export class AntiCheatService {
    * Analyze move patterns for suspicious behavior
    */
   private analyzeMovePattern(userId: string, move: GameMove, gameState: SessionState): { isSuspicious: boolean; reason: string } {
-    const gameMoves = this.moveHistory.get(gameState.gameId || '') || [];
+    const gameMoves = this.moveHistory.get('') || [];
     const playerMoves = gameMoves.filter(m => m.fromUserId === userId);
 
     // Check for repeated moves

@@ -1,4 +1,4 @@
-import { SessionState, PlayerColor, GameMove } from './types';
+import { SessionState, PlayerColor, GameMove, Coordinates, SessionMode } from './types';
 import { GameStateData } from '../services/GamePersistenceService';
 
 export interface ExportOptions {
@@ -109,7 +109,7 @@ export class GameExportImport {
     const pgnData: PGNData = {
       event: 'AR Chess Game',
       site: 'MentraOS',
-      date: gameData.gameStartTime.toISOString().split('T')[0],
+      date: gameData.gameStartTime.toISOString().split('T')[0] || '',
       round: '1',
       white: this.getPlayerName(gameData.player1Id),
       black: this.getPlayerName(gameData.player2Id),
@@ -164,7 +164,7 @@ export class GameExportImport {
         moveHistory: data.moveHistory || [],
         gameStartTime: new Date(data.gameStartTime),
         lastMoveTime: new Date(data.lastMoveTime),
-        gameEndTime: data.gameEndTime ? new Date(data.gameEndTime) : undefined,
+        gameEndTime: data.gameEndTime ? new Date(data.gameEndTime) : new Date(),
         gameResult: data.gameResult,
         winner: data.winner
       };
@@ -175,7 +175,7 @@ export class GameExportImport {
 
       return gameData;
     } catch (error) {
-      throw new Error(`Failed to import JSON data: ${error.message}`);
+      throw new Error(`Failed to import JSON data: ${(error as Error).message}`);
     }
   }
 
@@ -210,7 +210,7 @@ export class GameExportImport {
 
       return gameData;
     } catch (error) {
-      throw new Error(`Failed to import PGN data: ${error.message}`);
+      throw new Error(`Failed to import PGN data: ${(error as Error).message}`);
     }
   }
 
@@ -238,7 +238,7 @@ export class GameExportImport {
 
       return gameData;
     } catch (error) {
-      throw new Error(`Failed to import FEN data: ${error.message}`);
+      throw new Error(`Failed to import FEN data: ${(error as Error).message}`);
     }
   }
 
@@ -266,7 +266,7 @@ export class GameExportImport {
     // Check for FEN
     if (trimmed.includes('/') && trimmed.includes(' ')) {
       const parts = trimmed.split(' ');
-      if (parts.length >= 4 && parts[0].includes('/')) {
+      if (parts.length >= 4 && parts[0] && parts[0].includes('/')) {
         return 'fen';
       }
     }
@@ -286,12 +286,12 @@ export class GameExportImport {
       
       // White move
       if (i < moves.length) {
-        pgnMove.whiteMove = moves[i].algebraic || `${moves[i].from}-${moves[i].to}`;
+        pgnMove.whiteMove = moves[i]?.algebraic || `${moves[i]?.from}-${moves[i]?.to}`;
       }
       
       // Black move
       if (i + 1 < moves.length) {
-        pgnMove.blackMove = moves[i + 1].algebraic || `${moves[i + 1].from}-${moves[i + 1].to}`;
+        pgnMove.blackMove = moves[i + 1]?.algebraic || `${moves[i + 1]?.from}-${moves[i + 1]?.to}`;
       }
       
       pgnMoves.push(pgnMove);
@@ -324,25 +324,38 @@ export class GameExportImport {
   private static pgnMoveToGameMove(pgnMove: string, player: PlayerColor): GameMove {
     // This is a simplified conversion - would need more sophisticated parsing
     const move: GameMove = {
-      from: '',
-      to: '',
+      from: [0, 0] as Coordinates, // Default coordinates
+      to: [0, 0] as Coordinates, // Default coordinates
       piece: 'P', // Default to pawn
-      algebraic: pgnMove,
-      player
+      algebraic: pgnMove
     };
     
     // Basic parsing - could be enhanced
-    if (pgnMove.includes('-')) {
-      const [from, to] = pgnMove.split('-');
-      move.from = from;
-      move.to = to;
-    } else if (pgnMove.includes('x')) {
-      const [from, to] = pgnMove.split('x');
-      move.from = from;
-      move.to = to;
-    }
+          if (pgnMove.includes('-')) {
+        const [from, to] = pgnMove.split('-');
+        move.from = this.algebraicToCoordinates(from || '') || [0, 0];
+        move.to = this.algebraicToCoordinates(to || '') || [0, 0];
+      } else if (pgnMove.includes('x')) {
+        const [from, to] = pgnMove.split('x');
+        move.from = this.algebraicToCoordinates(from || '') || [0, 0];
+        move.to = this.algebraicToCoordinates(to || '') || [0, 0];
+      }
     
     return move;
+  }
+
+  /**
+   * Convert algebraic notation to coordinates
+   */
+  private static algebraicToCoordinates(algebraic: string): Coordinates | null {
+    if (!algebraic || algebraic.length !== 2) return null;
+    
+    const file = algebraic.charCodeAt(0) - 'a'.charCodeAt(0);
+    const rank = 8 - parseInt(algebraic[1] || '0');
+    
+    if (file < 0 || file > 7 || rank < 0 || rank > 7) return null;
+    
+    return [rank, file];
   }
 
   /**
@@ -413,17 +426,17 @@ export class GameExportImport {
         if (match) {
           const [, key, value] = match;
           switch (key) {
-            case 'Event': pgnData.event = value; break;
-            case 'Site': pgnData.site = value; break;
-            case 'Date': pgnData.date = value; break;
-            case 'Round': pgnData.round = value; break;
-            case 'White': pgnData.white = value; break;
-            case 'Black': pgnData.black = value; break;
-            case 'Result': pgnData.result = value; break;
-            case 'WhiteElo': pgnData.whiteElo = value; break;
-            case 'BlackElo': pgnData.blackElo = value; break;
-            case 'TimeControl': pgnData.timeControl = value; break;
-            default: pgnData.metadata[key] = value; break;
+            case 'Event': pgnData.event = value || ''; break;
+            case 'Site': pgnData.site = value || ''; break;
+            case 'Date': pgnData.date = value || ''; break;
+            case 'Round': pgnData.round = value || ''; break;
+            case 'White': pgnData.white = value || ''; break;
+            case 'Black': pgnData.black = value || ''; break;
+            case 'Result': pgnData.result = value || ''; break;
+            case 'WhiteElo': pgnData.whiteElo = value || ''; break;
+            case 'BlackElo': pgnData.blackElo = value || ''; break;
+            case 'TimeControl': pgnData.timeControl = value || ''; break;
+            default: if (key) pgnData.metadata[key] = value || ''; break;
           }
         }
       } else if (trimmed && !inMoves) {
@@ -454,7 +467,7 @@ export class GameExportImport {
     while ((match = moveRegex.exec(movesText)) !== null) {
       const [, moveNumber, whiteMove, blackMove] = match;
       const pgnMove: PGNMove = {
-        moveNumber: parseInt(moveNumber)
+        moveNumber: parseInt(moveNumber || '0')
       };
       
       if (whiteMove && whiteMove !== '...') {
@@ -486,7 +499,7 @@ export class GameExportImport {
   /**
    * Get game result from PGN result
    */
-  private static getGameResultFromPGN(pgnResult: string): string | undefined {
+  private static getGameResultFromPGN(pgnResult: string): 'white_win' | 'black_win' | 'draw' | 'resignation' | undefined {
     switch (pgnResult) {
       case '1-0': return 'white_win';
       case '0-1': return 'black_win';
@@ -519,10 +532,10 @@ export class GameExportImport {
     const castling = parts[2];
     const enPassant = parts[3];
     
-    return board.includes('/') && 
+        return Boolean(board && board.includes('/') &&
            (turn === 'w' || turn === 'b') &&
-           castling.length > 0 &&
-           (enPassant === '-' || /^[a-h][36]$/.test(enPassant));
+           castling && castling.length > 0 &&
+           (enPassant === '-' || (enPassant && /^[a-h][36]$/.test(enPassant))));
   }
 
   /**
@@ -538,12 +551,18 @@ export class GameExportImport {
       fullmoveNumber: 1,
       halfmoveClock: 0,
       userColor: PlayerColor.WHITE,
-      mode: 'playing',
+      mode: SessionMode.USER_TURN,
       isCheck: false,
       isCheckmate: false,
       isStalemate: false,
       capturedByWhite: [],
-      capturedByBlack: []
+      capturedByBlack: [],
+      aiDifficulty: null,
+      moveHistory: [],
+      gameStartTime: new Date(),
+      lastActivityTime: new Date(),
+      castlingRights: 'KQkq',
+      enPassantTarget: '-'
     };
   }
 
@@ -565,12 +584,18 @@ export class GameExportImport {
       fullmoveNumber: 1,
       halfmoveClock: 0,
       userColor: PlayerColor.WHITE,
-      mode: 'playing',
+      mode: SessionMode.USER_TURN,
       isCheck: false,
       isCheckmate: false,
       isStalemate: false,
       capturedByWhite: [],
-      capturedByBlack: []
+      capturedByBlack: [],
+      aiDifficulty: null,
+      moveHistory: [],
+      gameStartTime: new Date(),
+      lastActivityTime: new Date(),
+      castlingRights: 'KQkq',
+      enPassantTarget: '-'
     };
   }
 

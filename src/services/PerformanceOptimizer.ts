@@ -46,6 +46,8 @@ export interface PerformanceAlert {
   metrics: Partial<PerformanceMetrics>;
   threshold: number;
   current: number;
+  acknowledged?: boolean;
+  acknowledgedAt?: Date;
 }
 
 export class PerformanceOptimizer {
@@ -168,7 +170,6 @@ export class PerformanceOptimizer {
       'k': 'king',
       'q': 'queen',
       'r': 'rook',
-      'b': 'bishop',
       'n': 'knight',
       'p': 'pawn',
       'c': 'check',
@@ -550,8 +551,8 @@ export class PerformanceOptimizer {
    */
   getPerformanceSummary(): {
     metrics: PerformanceMetrics;
-    cacheStats: ReturnType<typeof this.getCacheStats>;
-    connectionStats: ReturnType<typeof this.getConnectionPoolStats>;
+    cacheStats: ReturnType<PerformanceOptimizer['getCacheStats']>;
+    connectionStats: ReturnType<PerformanceOptimizer['getConnectionPoolStats']>;
     alerts: PerformanceAlert[];
   } {
     return {

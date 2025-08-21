@@ -232,14 +232,17 @@ export class RateLimiter {
 
     // Clean up expired requests
     this.requests.forEach((requests, key) => {
-      const config = this.limits.get(key.split(':')[1]);
-      if (config) {
-        const windowStart = now - config.windowMs;
-        const validRequests = requests.filter(timestamp => timestamp > windowStart);
-        
-        if (validRequests.length !== requests.length) {
-          this.requests.set(key, validRequests);
-          cleanedRequests += requests.length - validRequests.length;
+      const action = key.split(':')[1];
+      if (action) {
+        const config = this.limits.get(action);
+        if (config) {
+          const windowStart = now - config.windowMs;
+          const validRequests = requests.filter(timestamp => timestamp > windowStart);
+          
+          if (validRequests.length !== requests.length) {
+            this.requests.set(key, validRequests);
+            cleanedRequests += requests.length - validRequests.length;
+          }
         }
       }
     });

@@ -330,13 +330,7 @@ export class ChallengeNotifications {
     });
   }
 
-  /**
-   * Clean up notifications
-   */
-  cleanup(): void {
-    this.activeNotifications.clear();
-    this.notificationCallbacks = [];
-  }
+
 
   /**
    * Check for expired challenges and clean them up

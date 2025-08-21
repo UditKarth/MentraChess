@@ -197,8 +197,8 @@ export class SecurityService {
     }
 
     // Check if coordinates are within board bounds
-    const fromCoords = this.parseCoordinates(move.from);
-    const toCoords = this.parseCoordinates(move.to);
+    const fromCoords = move.from;
+    const toCoords = move.to;
     
     if (!fromCoords || !toCoords) return false;
     
@@ -220,7 +220,7 @@ export class SecurityService {
     if (square.length !== 2) return null;
     
     const file = square.charCodeAt(0) - 'a'.charCodeAt(0);
-    const rank = parseInt(square[1]) - 1;
+    const rank = parseInt(square[1] || '0') - 1;
     
     if (file < 0 || file > 7 || rank < 0 || rank > 7) return null;
     
@@ -330,7 +330,7 @@ export class SecurityService {
       activeBans: 0, // Would be calculated from ban list
       suspiciousUsers: this.authenticatedUsers.size, // Simplified
       lastViolationTime: this.violations.length > 0 ? 
-        this.violations[this.violations.length - 1].timestamp : undefined
+        this.violations[this.violations.length - 1]?.timestamp || new Date() : new Date()
     };
   }
 
