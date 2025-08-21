@@ -7,6 +7,9 @@ module.exports = {
     '**/?(*.)+(spec|test).ts',
     '**/test/**/*.ts'
   ],
+  testPathIgnorePatterns: [
+    '<rootDir>/src/test/setup.ts'
+  ],
   transform: {
     '^.+\\.ts$': 'ts-jest',
   },
@@ -21,5 +24,7 @@ module.exports = {
   moduleFileExtensions: ['ts', 'js', 'json'],
   setupFilesAfterEnv: ['<rootDir>/src/test/setup.ts'],
   testTimeout: 10000,
-  verbose: true
+  verbose: true,
+  forceExit: true,
+  detectOpenHandles: true
 }; 

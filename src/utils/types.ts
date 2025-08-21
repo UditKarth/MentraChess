@@ -27,8 +27,10 @@ export enum PlayerColor {
    */
   export enum SessionMode {
     INITIALIZING = 'initializing',
+    CHOOSING_GAME_MODE = 'choosing_game_mode', // New: Choose between AI and multiplayer
     CHOOSING_COLOR = 'choosing_color',
     CHOOSING_DIFFICULTY = 'choosing_difficulty',
+    CHOOSING_OPPONENT = 'choosing_opponent', // New: Choose friend to play against
     USER_TURN = 'user_turn',
     AI_TURN = 'ai_turn',
     AWAITING_CLARIFICATION = 'awaiting_clarification', // When a user move is ambiguous
@@ -83,6 +85,7 @@ export enum PlayerColor {
     mode: SessionMode;
     userColor: PlayerColor;
     aiDifficulty: Difficulty | null;
+    gameMode?: 'ai' | 'multiplayer' | null; // New: Track selected game mode
     board: Piece[][]; // 8x8 array representing the board state ([0][0] = a8)
     capturedByWhite: Piece[]; // Pieces captured by white (black pieces)
     capturedByBlack: Piece[]; // Pieces captured by black (white pieces)
@@ -108,6 +111,62 @@ export enum PlayerColor {
     gameResult?: 'white_win' | 'black_win' | 'draw' | undefined;
     gameStartTime: Date;
     lastActivityTime: Date;
+  }
+
+  /**
+   * Extended session state for multiplayer games
+   */
+  export interface MultiplayerSessionState extends SessionState {
+    // Multiplayer-specific fields
+    gameId?: string;
+    opponentId?: string;
+    playerColor: PlayerColor;
+    multiplayerGameMode: 'single_player' | 'multiplayer_waiting' | 'multiplayer_active' | 'multiplayer_ended';
+    
+    // Network state
+    isConnected: boolean;
+    lastOpponentMove?: GameMove;
+    lastOpponentMoveTime?: Date;
+    
+    // Game timing
+    moveTimeLimit?: number; // in seconds, optional
+    
+    // Matchmaking state
+    matchmakingStatus: 'idle' | 'searching' | 'challenging' | 'waiting_response' | 'in_game';
+    pendingChallenges: GameChallenge[];
+  }
+
+  /**
+   * Represents a game challenge between players
+   */
+  export interface GameChallenge {
+    id: string;
+    fromUserId: string;
+    fromNickname: string;
+    toUserId: string;
+    timestamp: Date;
+    expiresAt: Date;
+    accepted?: boolean | undefined;
+  }
+
+  /**
+   * Extended game move with multiplayer information
+   */
+  export interface GameMove {
+    piece: Piece;
+    from: Coordinates;
+    to: Coordinates;
+    captured?: Piece;
+    promotion?: Piece;
+    isCheck?: boolean;
+    isCheckmate?: boolean;
+    isStalemate?: boolean;
+    algebraic: string; // e.g., "e4", "Nxd4", "O-O"
+    timestamp?: Date;
+    isCastling?: boolean;
+    castlingSide?: 'kingside' | 'queenside';
+    fromUserId?: string; // Track who made the move
+    moveTime?: number; // Time taken for the move
   }
   
   /**

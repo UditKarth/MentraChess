@@ -7,7 +7,10 @@ import {
     Piece, 
     Coordinates,
     PotentialMove,
-    ClarificationData
+    ClarificationData,
+    MultiplayerSessionState,
+    GameChallenge,
+    GameMove
 } from '../utils/types';
 import { 
     initializeBoard, 
@@ -31,21 +34,33 @@ import { StockfishService } from '../services/StockfishService';
 import { stockfishMoveToInternal } from '../utils/stockfishUtils';
 import { SessionManager, ChessSessionInfo } from '../session/SessionManager';
 import { parseChessMove } from '../utils/chessMoveParser';
+import { GameModeCommandProcessor, GameModeCommand } from '../utils/gameModeCommands';
+import { NetworkService } from '../services/NetworkService';
+import { WebSocketNetworkService } from '../services/WebSocketNetworkService';
+import { MatchmakingService } from '../services/MatchmakingService';
+import { MatchmakingServiceImpl } from '../services/MatchmakingServiceImpl';
+import { MultiplayerGameManager } from '../services/MultiplayerGameManager';
 
 export class ChessServer extends AppServer {
     protected sessionManager: SessionManager;
     private readonly CLARIFICATION_TIMEOUT = 30000; // 30 seconds
     private stockfishService: StockfishService;
-
+    
+    // Multiplayer services
+    private networkService: NetworkService | null = null;
+    private matchmakingService?: MatchmakingService;
+    private multiplayerGameManager?: MultiplayerGameManager;
 
     // Cache for board rendering to reduce latency
     private boardCache: Map<string, { boardText: string; timestamp: number; useUnicode: boolean }> = new Map();
+    private cleanupInterval: NodeJS.Timeout | null = null;
     private readonly BOARD_CACHE_DURATION = 1000; // 1 second cache duration
 
     constructor(config: AppServerConfig) {
         super(config);
         
-
+        // Initialize session manager
+        this.sessionManager = new SessionManager();
         
         // Initialize Stockfish service
         console.log('Initializing Stockfish service in ChessServer...');
@@ -57,7 +72,33 @@ export class ChessServer extends AppServer {
             console.log('Continuing with simple AI fallback...');
             this.stockfishService = null as any;
         }
-        this.sessionManager = new SessionManager();
+        
+        // Initialize multiplayer services
+        console.log('Initializing multiplayer services...');
+        try {
+            // Environment-based WebSocket configuration
+            const isProduction = process.env.NODE_ENV === 'production';
+            
+            if (isProduction) {
+                // Production: Attach WebSocket to main HTTP server
+                console.log('[ChessServer] Production mode: Attaching WebSocket to main HTTP server');
+                // We'll initialize WebSocket after the server starts
+                this.networkService = null;
+            } else {
+                // Development/Testing: Use random port to avoid conflicts
+                console.log('[ChessServer] Development mode: Using random port for WebSocket server');
+                const wsPort = 8080 + Math.floor(Math.random() * 1000);
+                this.networkService = new WebSocketNetworkService(wsPort);
+                this.matchmakingService = new MatchmakingServiceImpl(this.networkService);
+                this.multiplayerGameManager = new MultiplayerGameManager(this.networkService);
+                this.setupMultiplayerEventHandlers();
+            }
+            
+            console.log('Multiplayer services initialized successfully');
+        } catch (error) {
+            console.warn('Failed to initialize multiplayer services:', error);
+            console.log('Continuing with single-player mode only...');
+        }
         
         // Set up periodic board cache cleanup
         this.setupPeriodicCleanup();
@@ -70,13 +111,15 @@ export class ChessServer extends AppServer {
         // Get settings from MentraOS
         const userColor = session.settings.get<string>('user_color', 'white');
         const aiDifficulty = session.settings.get<string>('ai_difficulty', 'medium');
-        console.log(`[DEBUG] User settings - color: ${userColor}, difficulty: ${aiDifficulty}`);
+        const gameMode = session.settings.get<string>('game_mode', ''); // Check if user has a game mode preference
+        console.log(`[DEBUG] User settings - color: ${userColor}, difficulty: ${aiDifficulty}, gameMode: ${gameMode}`);
 
-        // Initialize game state
+        // Initialize game state - start with game mode selection if no preference set
         const initialState: SessionState = {
-            mode: SessionMode.USER_TURN, // Start directly at user turn
+            mode: gameMode ? SessionMode.USER_TURN : SessionMode.CHOOSING_GAME_MODE, // Start with game mode selection
             userColor: userColor === 'white' ? PlayerColor.WHITE : PlayerColor.BLACK,
             aiDifficulty: aiDifficulty === 'easy' ? Difficulty.EASY : aiDifficulty === 'hard' ? Difficulty.HARD : Difficulty.MEDIUM,
+            gameMode: gameMode === 'ai' ? 'ai' : gameMode === 'multiplayer' ? 'multiplayer' : null,
             board: initializeBoard(),
             capturedByWhite: [],
             capturedByBlack: [],
@@ -108,10 +151,27 @@ export class ChessServer extends AppServer {
         this.setupDashboardIntegration(sessionId);
         console.log(`[DEBUG] Dashboard integration set up`);
 
-        // Start the game directly (skip color/difficulty selection)
-        console.log(`[DEBUG] Starting game for session: ${sessionId}`);
-        await this.startGame(sessionId);
-        console.log(`[DEBUG] Game started successfully for session: ${sessionId}`);
+        // Connect user to multiplayer services if available
+        if (this.networkService && this.matchmakingService) {
+            try {
+                await this.networkService.connect(userId);
+                console.log(`[DEBUG] User ${userId} connected to multiplayer services`);
+            } catch (error) {
+                console.warn(`Failed to connect user ${userId} to multiplayer services:`, error);
+            }
+        } else if (process.env.NODE_ENV === 'production') {
+            console.log(`[DEBUG] Multiplayer services not available for user ${userId} in production`);
+        }
+
+        // Start appropriate flow based on game mode
+        if (gameMode) {
+            console.log(`[DEBUG] Starting game with preset mode: ${gameMode}`);
+            await this.startGame(sessionId);
+        } else {
+            console.log(`[DEBUG] Showing game mode selection for session: ${sessionId}`);
+            await this.showGameModeSelection(sessionId);
+        }
+        console.log(`[DEBUG] Session initialization completed for session: ${sessionId}`);
     }
 
     protected async onStop(sessionId: string, userId: string, reason: string): Promise<void> {
@@ -145,6 +205,28 @@ export class ChessServer extends AppServer {
                     gameSession.dashboardCleanup();
                 } catch (error) {
                     this.logger.warn('Error during dashboard cleanup:', error);
+                }
+            }
+
+            // Clean up multiplayer services if available
+            if (this.networkService && this.matchmakingService) {
+                try {
+                    await this.networkService.disconnect(userId);
+                    await this.matchmakingService.leaveMatchmaking(userId);
+                    
+                    // Clean up any active games for this user
+                    if (this.multiplayerGameManager) {
+                        const activeGames = this.multiplayerGameManager.getActiveGames();
+                        for (const gameId of activeGames) {
+                            if (this.multiplayerGameManager.isUserInGame(userId, gameId)) {
+                                await this.multiplayerGameManager.cleanupGame(gameId);
+                            }
+                        }
+                    }
+                    
+                    console.log(`[DEBUG] User ${userId} disconnected from multiplayer services`);
+                } catch (error) {
+                    console.warn(`Failed to disconnect user ${userId} from multiplayer services:`, error);
                 }
             }
         }
@@ -443,7 +525,7 @@ export class ChessServer extends AppServer {
 
     private setupPeriodicCleanup(): void {
         // Clean up board cache every 5 minutes
-        setInterval(() => {
+        this.cleanupInterval = setInterval(() => {
             try {
                 this.cleanupBoardCache();
                 const stats = this.getMemoryStats();
@@ -453,6 +535,412 @@ export class ChessServer extends AppServer {
             }
         }, 5 * 60 * 1000); // 5 minutes
     }
+
+    /**
+     * Set up multiplayer event handlers
+     */
+    private setupMultiplayerEventHandlers(): void {
+        if (!this.networkService) return;
+
+        // Handle incoming game requests (challenges)
+        this.networkService.on('game_request', async (data) => {
+            const { fromUserId, toUserId, gameId } = data;
+            console.log(`[Multiplayer] Game request from ${fromUserId} to ${toUserId}, gameId: ${gameId}`);
+            
+            // Find the target user's session
+            const targetSession = this.findUserSession(toUserId);
+            if (targetSession) {
+                await this.handleIncomingChallenge(targetSession.sessionId, fromUserId, gameId);
+            }
+        });
+
+        // Handle game responses (challenge accepted/rejected)
+        this.networkService.on('game_response', async (data) => {
+            const { gameId, fromUserId, accepted } = data;
+            console.log(`[Multiplayer] Game response for ${gameId}: ${accepted ? 'accepted' : 'rejected'}`);
+            
+            if (accepted) {
+                await this.startMultiplayerGame(gameId, fromUserId);
+            }
+        });
+
+        // Handle incoming moves
+        this.networkService.on('move', async (data) => {
+            const { gameId, fen, move } = data;
+            console.log(`[Multiplayer] Received move for game ${gameId}: ${move.algebraic}`);
+            
+            await this.handleOpponentMove(gameId, fen, move);
+        });
+
+        // Handle game end
+        this.networkService.on('game_end', async (data) => {
+            const { gameId, reason, winner } = data;
+            console.log(`[Multiplayer] Game ${gameId} ended: ${reason}, winner: ${winner}`);
+            
+            // Find the session for this game and handle the game end
+            const sessions = this.sessionManager.getAllSessionIds();
+            for (const sessionId of sessions) {
+                const session = this.sessionManager.getSession(sessionId);
+                if (session && session.info?.userId) {
+                    // Check if this user is in the game
+                    if (this.multiplayerGameManager?.isUserInGame(session.info.userId, gameId)) {
+                        await this.handleMultiplayerGameEnd(sessionId, reason, winner);
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Show game mode selection menu to user
+     */
+    private async showGameModeSelection(sessionId: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
+        const { appSession, state } = gameSession;
+        
+        // Update session mode
+        state.mode = SessionMode.CHOOSING_GAME_MODE;
+        this.sessionManager.setState(sessionId, state);
+
+        // Show game mode selection menu
+        const menuText = GameModeCommandProcessor.getMenuText();
+        
+        await this.updateBoardAndFeedback(sessionId, 'Welcome to Chess! Select game mode.');
+
+        this.updateDashboardContent(sessionId);
+    }
+
+    /**
+     * Handle game mode command processing
+     */
+    private async handleGameModeCommand(sessionId: string, transcript: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
+        const { appSession, state } = gameSession;
+        const userId = gameSession.info?.userId || '';
+        const command = GameModeCommandProcessor.parseCommand(transcript);
+
+        console.log(`[GameMode] Processing command: ${command.type}`, command.params);
+
+        switch (command.type) {
+            case 'ai_game':
+                await this.startAIGame(sessionId, command.params?.difficulty);
+                break;
+
+            case 'friend_game':
+                if (command.params?.friendName) {
+                    await this.startFriendChallenge(sessionId, command.params.friendName);
+                } else {
+                    await this.showFriendSelection(sessionId);
+                }
+                break;
+
+            case 'random_match':
+                await this.joinRandomMatchmaking(sessionId);
+                break;
+
+            case 'show_menu':
+                await this.showGameModeSelection(sessionId);
+                break;
+
+            case 'help':
+                const helpText = GameModeCommandProcessor.getHelpText();
+                await this.updateBoardAndFeedback(sessionId, 'Help: Say "play against AI", "play against [friend]", "find opponent", or "menu".');
+                this.updateDashboardContent(sessionId);
+                break;
+
+            case 'accept':
+            case 'reject':
+            case 'cancel':
+                // These should be handled in handleOpponentChoice, redirect there
+                await this.handleOpponentChoice(sessionId, transcript);
+                break;
+
+            case 'unknown':
+            default:
+                await this.updateBoardAndFeedback(sessionId, 'Command not recognized. Say "help" for options or "menu" to return.');
+                break;
+        }
+    }
+
+    /**
+     * Start AI game with specified difficulty
+     */
+    private async startAIGame(sessionId: string, difficulty?: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
+        const { appSession, state } = gameSession;
+
+        // Set difficulty if provided
+        if (difficulty && GameModeCommandProcessor.isValidDifficulty(difficulty)) {
+            state.aiDifficulty = difficulty === 'easy' ? Difficulty.EASY : 
+                                  difficulty === 'hard' ? Difficulty.HARD : Difficulty.MEDIUM;
+        }
+
+        // Set game mode
+        state.gameMode = 'ai';
+        state.mode = SessionMode.USER_TURN;
+        this.sessionManager.setState(sessionId, state);
+
+        // Save preference for future sessions
+        // appSession.settings.set('game_mode', 'ai'); // TODO: Fix settings API
+
+        await this.updateBoardAndFeedback(sessionId, `Starting AI game with ${state.aiDifficulty} difficulty. Good luck!`);
+
+        await this.startGame(sessionId);
+    }
+
+    /**
+     * Start friend challenge process
+     */
+    private async startFriendChallenge(sessionId: string, friendName: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession || !this.matchmakingService) return;
+
+        const { appSession } = gameSession;
+        const userId = gameSession.info?.userId || '';
+
+        try {
+            // For demo purposes, we'll simulate finding the friend
+            // In a real implementation, this would look up the friend by name/ID
+            const friendUserId = `friend_${friendName.toLowerCase()}`;
+            
+            await this.updateBoardAndFeedback(sessionId, `Sending challenge to ${friendName}. Please wait for their response.`);
+
+            const challenge = await this.matchmakingService.sendChallenge(userId, friendUserId);
+            
+            // Update session state to show waiting for response
+            const state = gameSession.state;
+            state.mode = SessionMode.CHOOSING_OPPONENT;
+            this.sessionManager.setState(sessionId, state);
+
+            this.updateDashboardContent(sessionId);
+
+        } catch (error) {
+            console.error(`Failed to send challenge to ${friendName}:`, error);
+            await this.updateBoardAndFeedback(sessionId, `Sorry, I couldn't send a challenge to ${friendName}. They might not be online.`);
+            await this.showGameModeSelection(sessionId);
+        }
+    }
+
+    /**
+     * Join random matchmaking queue
+     */
+    private async joinRandomMatchmaking(sessionId: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession || !this.matchmakingService) return;
+
+        const { appSession } = gameSession;
+        const userId = gameSession.info?.userId || '';
+
+        try {
+            await this.matchmakingService.joinMatchmaking(userId, {
+                timeControl: 'rapid',
+                allowUnrated: true
+            });
+
+            await this.updateBoardAndFeedback(sessionId, 'Joining matchmaking queue. Looking for an opponent...');
+
+            // Update session state
+            const state = gameSession.state;
+            state.mode = SessionMode.CHOOSING_OPPONENT;
+            this.sessionManager.setState(sessionId, state);
+
+            this.updateDashboardContent(sessionId);
+
+        } catch (error) {
+            console.error('Failed to join matchmaking:', error);
+            await this.updateBoardAndFeedback(sessionId, 'Sorry, matchmaking is not available right now. Please try again later.');
+            await this.showGameModeSelection(sessionId);
+        }
+    }
+
+    /**
+     * Show friend selection interface
+     */
+    private async showFriendSelection(sessionId: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
+        const { appSession } = gameSession;
+
+        await this.updateBoardAndFeedback(sessionId, 'Say "play against" followed by your friend\'s name. For example, "play against Alice".');
+
+        this.updateDashboardContent(sessionId);
+    }
+
+    /**
+     * Find user session by userId
+     */
+    private findUserSession(userId: string): { sessionId: string; session: ChessSessionInfo } | null {
+        const sessionIds = this.sessionManager.getAllSessionIds();
+        for (const sessionId of sessionIds) {
+            const session = this.sessionManager.getSession(sessionId);
+            if (session?.info?.userId === userId) {
+                return { sessionId, session: session.info };
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Handle incoming challenge from another player
+     */
+    private async handleIncomingChallenge(sessionId: string, fromUserId: string, challengeId: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession || !this.matchmakingService) return;
+
+        const { appSession, state } = gameSession;
+
+        try {
+            // Get challenger's nickname
+            const challengerNickname = await this.matchmakingService.getUserNickname(fromUserId);
+
+            await this.updateBoardAndFeedback(sessionId, `${challengerNickname} has challenged you to a chess game! Say "accept" to play or "reject" to decline.`);
+
+            // Update session to show pending challenge
+            state.mode = SessionMode.CHOOSING_OPPONENT;
+            // Store challenge info for later processing
+            (state as any).pendingChallengeId = challengeId;
+            (state as any).challengerName = challengerNickname;
+            
+            this.sessionManager.setState(sessionId, state);
+            this.updateDashboardContent(sessionId);
+
+        } catch (error) {
+            console.error('Failed to handle incoming challenge:', error);
+        }
+    }
+
+    /**
+     * Start multiplayer game
+     */
+    private async startMultiplayerGame(gameId: string, opponentUserId: string): Promise<void> {
+        if (!this.multiplayerGameManager) {
+            console.error('MultiplayerGameManager not available');
+            return;
+        }
+
+        // Get the current user's session to find their userId
+        const currentSession = this.findUserSession(opponentUserId);
+        if (!currentSession) {
+            console.error('Could not find current user session');
+            return;
+        }
+
+        const currentUserId = currentSession.session.userId;
+
+        try {
+            // Create the multiplayer game
+            await this.multiplayerGameManager.createGame(gameId, currentUserId, opponentUserId);
+            
+            // Set up game event handlers for the current user
+            this.setupMultiplayerGameHandlers(gameId, currentSession.sessionId);
+            
+            console.log(`[Multiplayer] Started game ${gameId} between ${currentUserId} and ${opponentUserId}`);
+        } catch (error) {
+            console.error(`Failed to start multiplayer game ${gameId}:`, error);
+        }
+    }
+
+    /**
+     * Set up event handlers for a specific multiplayer game
+     */
+    private setupMultiplayerGameHandlers(gameId: string, sessionId: string): void {
+        if (!this.multiplayerGameManager) return;
+
+        // Handle game state changes
+        this.multiplayerGameManager.onGameStateChange(gameId, (state) => {
+            this.handleMultiplayerGameStateChange(sessionId, state);
+        });
+
+        // Handle opponent moves
+        this.multiplayerGameManager.onMove(gameId, (move, fen) => {
+            this.handleOpponentMove(sessionId, move, fen);
+        });
+
+        // Handle game end
+        this.multiplayerGameManager.onGameEnd(gameId, (reason, winner) => {
+            this.handleMultiplayerGameEnd(sessionId, reason, winner);
+        });
+    }
+
+    /**
+     * Handle multiplayer game state changes
+     */
+    private async handleMultiplayerGameStateChange(sessionId: string, state: SessionState): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
+        // Update the session state
+        gameSession.state = { ...gameSession.state, ...state };
+        this.sessionManager.setState(sessionId, gameSession.state);
+
+        // Update the board display
+        await this.updateBoardAndFeedback(sessionId, 'Opponent made a move!');
+        this.updateDashboardContent(sessionId);
+    }
+
+    /**
+     * Handle opponent move in multiplayer game
+     */
+    private async handleOpponentMove(sessionId: string, move: GameMove, fen: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
+        const { appSession } = gameSession;
+
+        // Announce the move
+        const moveText = move.algebraic || `${move.from} to ${move.to}`;
+        await this.updateBoardAndFeedback(sessionId, `Opponent played: ${moveText}`);
+        
+        // Update dashboard
+        this.updateDashboardContent(sessionId);
+    }
+
+    /**
+     * Handle multiplayer game end
+     */
+    private async handleMultiplayerGameEnd(sessionId: string, reason: string, winner?: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) return;
+
+        const { appSession } = gameSession;
+        const userId = gameSession.info?.userId || '';
+
+        // Update session state
+        gameSession.state.mode = SessionMode.GAME_OVER;
+        gameSession.state.gameResult = winner === userId ? 'white_win' : 
+                                       winner ? 'black_win' : 'draw';
+        this.sessionManager.setState(sessionId, gameSession.state);
+
+        // Announce game end
+        let endMessage = '';
+        if (winner === userId) {
+            endMessage = 'Congratulations! You won!';
+        } else if (winner) {
+            endMessage = 'Game over. You lost.';
+        } else {
+            endMessage = 'Game ended in a draw.';
+        }
+
+        await this.updateBoardAndFeedback(sessionId, endMessage);
+        this.updateDashboardContent(sessionId);
+
+        // Clean up the game after a delay
+        setTimeout(async () => {
+            if (this.multiplayerGameManager) {
+                await this.multiplayerGameManager.cleanupGame(sessionId);
+            }
+        }, 5000);
+    }
+
+
 
     private async startGame(sessionId: string): Promise<void> {
         const gameSession = this.sessionManager.getSession(sessionId);
@@ -523,6 +1011,14 @@ export class ChessServer extends AppServer {
             appSession.logger.debug('Processing user input', { transcript, mode: state.mode });
 
             switch (state.mode) {
+                case SessionMode.CHOOSING_GAME_MODE:
+                    await this.handleGameModeCommand(sessionId, transcript);
+                    break;
+
+                case SessionMode.CHOOSING_OPPONENT:
+                    await this.handleOpponentChoice(sessionId, transcript);
+                    break;
+
                 case SessionMode.USER_TURN:
                     await this.handleUserMove(sessionId, transcript);
                     break;
@@ -537,6 +1033,61 @@ export class ChessServer extends AppServer {
         } catch (error) {
             console.error('Error processing user input:', error);
             await this.updateBoardAndFeedback(sessionId, 'Error processing input. Please try again.');
+        }
+    }
+
+    /**
+     * Handle opponent choice commands (accept/reject challenges)
+     */
+    private async handleOpponentChoice(sessionId: string, transcript: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession || !this.matchmakingService) return;
+
+        const { appSession, state } = gameSession;
+        const userId = gameSession.info?.userId || '';
+        const input = transcript.toLowerCase().trim();
+
+        // Check for challenge response commands
+        if (input.includes('accept')) {
+            const challengeId = (state as any).pendingChallengeId;
+            if (challengeId) {
+                try {
+                    const accepted = await this.matchmakingService.acceptChallenge(challengeId, userId);
+                    if (accepted) {
+                        await this.updateBoardAndFeedback(sessionId, 'Challenge accepted! Starting game...');
+                        // The game will be started by the multiplayer event handler
+                    } else {
+                        await this.updateBoardAndFeedback(sessionId, 'Sorry, the challenge is no longer valid.');
+                        await this.showGameModeSelection(sessionId);
+                    }
+                } catch (error) {
+                    console.error('Failed to accept challenge:', error);
+                    await this.updateBoardAndFeedback(sessionId, 'Sorry, I couldn\'t accept the challenge. Please try again.');
+                }
+            }
+        } else if (input.includes('reject') || input.includes('decline')) {
+            const challengeId = (state as any).pendingChallengeId;
+            if (challengeId) {
+                try {
+                    await this.matchmakingService.rejectChallenge(challengeId, userId);
+                    await this.updateBoardAndFeedback(sessionId, 'Challenge declined.');
+                    await this.showGameModeSelection(sessionId);
+                } catch (error) {
+                    console.error('Failed to reject challenge:', error);
+                }
+            }
+        } else if (input.includes('cancel') || input.includes('back') || input.includes('menu')) {
+            // Cancel current matchmaking/challenge
+            try {
+                await this.matchmakingService.leaveMatchmaking(userId);
+                await this.updateBoardAndFeedback(sessionId, 'Cancelled.');
+                await this.showGameModeSelection(sessionId);
+            } catch (error) {
+                console.error('Failed to cancel matchmaking:', error);
+            }
+        } else {
+            // Try processing as a game mode command in case they want to switch
+            await this.handleGameModeCommand(sessionId, transcript);
         }
     }
 
@@ -1192,6 +1743,28 @@ export class ChessServer extends AppServer {
 
     public async start(): Promise<void> {
         await super.start();
+        
+        // Initialize WebSocket server in production after HTTP server starts
+        if (process.env.NODE_ENV === 'production' && !this.networkService) {
+            try {
+                console.log('[ChessServer] Initializing WebSocket server for production...');
+                const expressApp = this.getExpressApp();
+                const server = expressApp.get('server') as any;
+                
+                if (server) {
+                    this.networkService = new WebSocketNetworkService(server);
+                    this.matchmakingService = new MatchmakingServiceImpl(this.networkService);
+                    this.multiplayerGameManager = new MultiplayerGameManager(this.networkService);
+                    this.setupMultiplayerEventHandlers();
+                    console.log('[ChessServer] WebSocket server attached to HTTP server successfully');
+                } else {
+                    console.warn('[ChessServer] Could not get HTTP server, WebSocket will not be available');
+                }
+            } catch (error) {
+                console.error('[ChessServer] Failed to initialize WebSocket server:', error);
+            }
+        }
+        
         console.log('Chess server started successfully');
     }
 
@@ -1222,7 +1795,72 @@ export class ChessServer extends AppServer {
         this.boardCache.clear();
         console.log('[ChessServer] Board cache cleared');
         
+        // Clear periodic cleanup interval
+        if (this.cleanupInterval) {
+            clearInterval(this.cleanupInterval);
+            this.cleanupInterval = null;
+            console.log('[ChessServer] Periodic cleanup interval cleared');
+        }
+        
         await super.stop();
         console.log('[ChessServer] Chess server stopped successfully');
+    }
+
+    // Public method for test cleanup (doesn't call super.stop())
+    public async cleanupForTests(): Promise<void> {
+        console.log('[ChessServer] Cleaning up for tests...');
+        
+        // Stop all active sessions properly
+        const sessionIds = this.sessionManager.getAllSessionIds();
+        for (const sessionId of sessionIds) {
+            try {
+                await this.onStop(sessionId, 'system', 'test_cleanup');
+            } catch (error) {
+                console.error(`[ChessServer] Error stopping session ${sessionId}:`, error);
+            }
+        }
+        
+        // Stop Stockfish service
+        if (this.stockfishService) {
+            try {
+                await this.stockfishService.stop();
+                console.log('[ChessServer] Stockfish service stopped for tests');
+            } catch (error) {
+                console.error('[ChessServer] Error stopping Stockfish service:', error);
+            }
+        }
+        
+        // Stop WebSocket server
+        if (this.networkService) {
+            try {
+                this.networkService.stop();
+                console.log('[ChessServer] Network service stopped for tests');
+            } catch (error) {
+                console.error('[ChessServer] Error stopping network service:', error);
+            }
+        }
+        
+        // Stop matchmaking service
+        if (this.matchmakingService) {
+            try {
+                (this.matchmakingService as any).stop();
+                console.log('[ChessServer] Matchmaking service stopped for tests');
+            } catch (error) {
+                console.error('[ChessServer] Error stopping matchmaking service:', error);
+            }
+        }
+        
+        // Clear board cache
+        this.boardCache.clear();
+        console.log('[ChessServer] Board cache cleared for tests');
+        
+        // Clear periodic cleanup interval
+        if (this.cleanupInterval) {
+            clearInterval(this.cleanupInterval);
+            this.cleanupInterval = null;
+            console.log('[ChessServer] Periodic cleanup interval cleared for tests');
+        }
+        
+        // Note: We intentionally don't call super.stop() to avoid process.exit()
     }
 } 
