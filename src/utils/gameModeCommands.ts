@@ -102,7 +102,8 @@ export class GameModeCommandProcessor {
         
       case 'FRIEND_NAMED':
         const friendName = match[3];
-        if (friendName && friendName.length >= 2) {
+        // Add stricter validation for friend names
+        if (friendName && friendName.length >= 3 && this.isValidFriendName(friendName)) {
           return { 
             type: 'friend_game',
             params: { friendName }
@@ -123,6 +124,43 @@ export class GameModeCommandProcessor {
     }
   }
   
+  /**
+   * Validate if a string is a valid friend name
+   */
+  private static isValidFriendName(name: string): boolean {
+    const cleanName = name.trim().toLowerCase();
+    
+    // Must be at least 3 characters
+    if (cleanName.length < 3) {
+      return false;
+    }
+    
+    // Don't allow common incomplete words
+    const incompleteWords = ['hel', 'he', 'h', 'pl', 'p', 'roo', 'ro', 'r', 'kni', 'kni', 'kn', 'k', 'que', 'qu', 'q', 'bi', 'b', 'pa', 'p'];
+    if (incompleteWords.includes(cleanName)) {
+      return false;
+    }
+    
+    // Don't allow if it starts with common incomplete prefixes
+    const incompletePrefixes = ['hel', 'he', 'pl', 'roo', 'kni', 'que', 'bi', 'pa'];
+    if (incompletePrefixes.some(prefix => cleanName.startsWith(prefix) && cleanName !== prefix)) {
+      return false;
+    }
+    
+    // Don't allow command words
+    const commandWords = ['ai', 'computer', 'bot', 'friend', 'buddy', 'mate', 'opponent', 'match', 'game', 'menu', 'help', 'single', 'multi', 'player', 'mode', 'multiplayer', 'easy', 'medium', 'hard'];
+    if (commandWords.includes(cleanName)) {
+      return false;
+    }
+    
+    // Must contain only letters and spaces
+    if (!/^[a-zA-Z\s]+$/.test(cleanName)) {
+      return false;
+    }
+    
+    return true;
+  }
+  
   private static extractFriendName(text: string): string | null {
     // Check if it starts with "play against" or similar patterns
     const playAgainstPattern = /^(play\s+)?(against\s+)?(.+)$/i;
@@ -134,19 +172,8 @@ export class GameModeCommandProcessor {
     
     const friendName = match[3]?.trim();
     
-    // Don't return empty strings or very short names
-    if (!friendName || friendName.length < 2) {
-      return null;
-    }
-    
-    // Don't return if it's a common command word
-    const commandWords = ['ai', 'computer', 'bot', 'friend', 'buddy', 'mate', 'opponent', 'match', 'game', 'menu', 'help', 'single', 'multi', 'player', 'mode', 'multiplayer'];
-    if (commandWords.includes(friendName.toLowerCase())) {
-      return null;
-    }
-    
-    // Don't return if it contains AI-related words
-    if (friendName.toLowerCase().includes('ai') || friendName.toLowerCase().includes('computer') || friendName.toLowerCase().includes('bot')) {
+    // Use the same validation as isValidFriendName
+    if (!friendName || !this.isValidFriendName(friendName)) {
       return null;
     }
     

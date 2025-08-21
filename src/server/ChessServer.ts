@@ -56,6 +56,10 @@ export class ChessServer extends AppServer {
     private boardCache: Map<string, { boardText: string; timestamp: number; useUnicode: boolean }> = new Map();
     private cleanupInterval: NodeJS.Timeout | null = null;
     private readonly BOARD_CACHE_DURATION = 1000; // 1 second cache duration
+    
+    // Command processing debounce
+    private commandDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
+    private readonly COMMAND_DEBOUNCE_DELAY = 500; // 500ms delay before processing commands
 
     constructor(config: AppServerConfig) {
         super(config);
@@ -238,6 +242,13 @@ export class ChessServer extends AppServer {
         // Clean up board cache for this session
         this.invalidateBoardCache(sessionId);
 
+        // Clean up command debounce timer for this session
+        const debounceTimer = this.commandDebounceTimers.get(sessionId);
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+            this.commandDebounceTimers.delete(sessionId);
+        }
+
         // Remove session from manager
         this.sessionManager.removeSession(sessionId);
         
@@ -256,11 +267,12 @@ export class ChessServer extends AppServer {
                 if (data.text) {
                     // Only show live transcription for non-final text to avoid excessive updates
                     if (!data.isFinal) {
+                        // Use a more subtle approach for live transcription
                         this.showLiveTranscription(sessionId, data.text);
+                    } else {
+                        // Use debounce to prevent premature command processing
+                        this.debounceCommandProcessing(sessionId, data.text);
                     }
-                }
-                if (data.isFinal && data.text) {
-                    this.handleUserInput(sessionId, data.text);
                 }
             } catch (error) {
                 console.error('Error in transcription handler:', error);
@@ -467,20 +479,22 @@ export class ChessServer extends AppServer {
     private async showLiveTranscription(sessionId: string, transcript: string) {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
-        const { appSession, state } = gameSession;
+        const { appSession } = gameSession;
         
         try {
-            // Use cached board text to reduce latency
-            const boardText = this.getCachedBoardText(sessionId, state, appSession);
-            
-            // Use a faster display method for live transcriptions
-            // Only show the transcript as a simple overlay to minimize latency
-            await appSession.layouts.showTextWall(transcript, { 
-                durationMs: 2000
-            });
+            // Use a very subtle approach for live transcription
+            // Only show if the transcript is substantial enough (more than 2 characters)
+            if (transcript.trim().length > 2) {
+                // Use a very short duration to avoid interference with main UI
+                await appSession.layouts.showTextWall(transcript, { 
+                    durationMs: 1000 // Very short duration
+                });
+            }
         } catch (error) {
-            console.error('Error showing live transcription:', error);
-            // Don't show fallback for live transcription to avoid spam
+            // Silently ignore live transcription errors to avoid spam
+            if (process.env.NODE_ENV !== 'production') {
+                console.error('Error showing live transcription:', error);
+            }
         }
     }
 
@@ -1056,23 +1070,40 @@ export class ChessServer extends AppServer {
         const { appSession, state } = gameSession;
 
         try {
-            appSession.logger.debug('Processing user input', { transcript, mode: state.mode });
+            // Add safeguards to prevent processing incomplete commands
+            const trimmedTranscript = transcript.trim();
+            
+            // Skip very short inputs that are likely incomplete
+            if (trimmedTranscript.length < 2) {
+                console.log(`[Transcription] Skipping very short input: "${trimmedTranscript}"`);
+                return;
+            }
+            
+            // Skip inputs that end with common incomplete words
+            const incompleteEndings = ['hel', 'he', 'h', 'pl', 'p', 'roo', 'ro', 'r', 'kni', 'kni', 'kn', 'k'];
+            const lowerInput = trimmedTranscript.toLowerCase();
+            if (incompleteEndings.some(ending => lowerInput.endsWith(ending))) {
+                console.log(`[Transcription] Skipping likely incomplete input: "${trimmedTranscript}"`);
+                return;
+            }
+
+            appSession.logger.debug('Processing user input', { transcript: trimmedTranscript, mode: state.mode });
 
             switch (state.mode) {
                 case SessionMode.CHOOSING_GAME_MODE:
-                    await this.handleGameModeCommand(sessionId, transcript);
+                    await this.handleGameModeCommand(sessionId, trimmedTranscript);
                     break;
 
                 case SessionMode.CHOOSING_OPPONENT:
-                    await this.handleOpponentChoice(sessionId, transcript);
+                    await this.handleOpponentChoice(sessionId, trimmedTranscript);
                     break;
 
                 case SessionMode.USER_TURN:
-                    await this.handleUserMove(sessionId, transcript);
+                    await this.handleUserMove(sessionId, trimmedTranscript);
                     break;
 
                 case SessionMode.AWAITING_CLARIFICATION:
-                    await this.handleClarification(sessionId, transcript);
+                    await this.handleClarification(sessionId, trimmedTranscript);
                     break;
 
                 default:
@@ -1082,6 +1113,26 @@ export class ChessServer extends AppServer {
             console.error('Error processing user input:', error);
             await this.updateBoardAndFeedback(sessionId, 'Error processing input. Please try again.');
         }
+    }
+
+    /**
+     * Debounce command processing to prevent premature execution
+     */
+    private debounceCommandProcessing(sessionId: string, transcript: string): void {
+        // Clear any existing timer for this session
+        const existingTimer = this.commandDebounceTimers.get(sessionId);
+        if (existingTimer) {
+            clearTimeout(existingTimer);
+        }
+
+        // Set a new timer
+        const timer = setTimeout(() => {
+            console.log(`[Transcription] Processing debounced command: "${transcript}"`);
+            this.handleUserInput(sessionId, transcript);
+            this.commandDebounceTimers.delete(sessionId);
+        }, this.COMMAND_DEBOUNCE_DELAY);
+
+        this.commandDebounceTimers.set(sessionId, timer);
     }
 
     /**
@@ -1919,6 +1970,13 @@ export class ChessServer extends AppServer {
             this.cleanupInterval = null;
             console.log('[ChessServer] Periodic cleanup interval cleared for tests');
         }
+        
+        // Clear all command debounce timers
+        for (const [sessionId, timer] of this.commandDebounceTimers.entries()) {
+            clearTimeout(timer);
+        }
+        this.commandDebounceTimers.clear();
+        console.log('[ChessServer] Command debounce timers cleared for tests');
         
         // Note: We intentionally don't call super.stop() to avoid process.exit()
     }
