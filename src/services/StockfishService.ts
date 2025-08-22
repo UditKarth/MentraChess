@@ -17,6 +17,7 @@ export class StockfishService {
     private currentRequest: any = null;
     private buffer: string = '';
     private lastBestMove: string | null = null;
+    private initializationTimeout: NodeJS.Timeout | null = null;
 
     constructor() {
         this.initializeStockfish();
@@ -25,7 +26,7 @@ export class StockfishService {
     private initializeStockfish(): void {
         try {
             console.log('🔧 Initializing Stockfish engine...');
-            // Use the actual Stockfish binary instead of WASM
+            // Use the system Stockfish binary (installed via Dockerfile on Railway)
             this.stockfish = spawn('stockfish', [], { stdio: ['pipe', 'pipe', 'pipe'] });
             
             this.stockfish.stdout.on('data', (data: Buffer) => {
@@ -47,20 +48,39 @@ export class StockfishService {
                 this.stockfish = null;
                 this.isReady = false;
                 this.isInitialized = true;
+                this.clearInitializationTimeout();
             });
             
             this.stockfish.on('exit', (code, signal) => {
                 console.log(`🔄 Stockfish process exited with code ${code}, signal ${signal}`);
                 this.stockfish = null;
                 this.isReady = false;
+                this.clearInitializationTimeout();
             });
             
             this.initializeEngine();
+            
+            // Set a timeout for initialization to prevent hanging
+            this.initializationTimeout = setTimeout(() => {
+                console.warn('⚠️ Stockfish initialization timeout - marking as initialized anyway');
+                this.isInitialized = true;
+                if (!this.isReady) {
+                    console.log('⚠️ Stockfish not ready after timeout, will use fallback AI');
+                }
+            }, 10000); // 10 second timeout
+            
         } catch (error) {
             console.error('❌ Failed to spawn stockfish binary:', error);
             this.stockfish = null;
             this.isReady = false;
             this.isInitialized = true;
+        }
+    }
+
+    private clearInitializationTimeout(): void {
+        if (this.initializationTimeout) {
+            clearTimeout(this.initializationTimeout);
+            this.initializationTimeout = null;
         }
     }
 
@@ -94,6 +114,7 @@ export class StockfishService {
             
             if (line === 'readyok') {
                 this.isReady = true;
+                this.clearInitializationTimeout();
                 console.log('✅ Stockfish engine is ready');
             } else if (line.startsWith('bestmove')) {
                 // Parse best move response
@@ -101,6 +122,14 @@ export class StockfishService {
                 if (parts.length >= 2) {
                     this.lastBestMove = parts[1] || null;
                     console.log(`🎯 Stockfish best move: ${this.lastBestMove}`);
+                    
+                    // Handle the current request if we have one
+                    if (this.currentRequest && this.lastBestMove) {
+                        const move = this.parseMove(this.lastBestMove);
+                        console.log(`[DEBUG] StockfishService.handleStockfishMessage: Resolving with move: ${JSON.stringify(move)}`);
+                        this.currentRequest.resolve(move);
+                        this.currentRequest = null;
+                    }
                 }
             } else if (line.startsWith('info') && line.includes('score')) {
                 // Parse evaluation info - simplified for now
@@ -109,24 +138,6 @@ export class StockfishService {
                 }
             }
         }
-    }
-
-    private handleBestMove(line: string): void {
-        const parts = line.split(' ');
-        if (parts.length >= 2) {
-            const bestMove = parts[1];
-            console.log(`[DEBUG] StockfishService.handleBestMove: Parsed bestmove: ${bestMove}`);
-            if (this.currentRequest && bestMove) {
-                const move = this.parseMove(bestMove);
-                console.log(`[DEBUG] StockfishService.handleBestMove: Resolving with move: ${JSON.stringify(move)}`);
-                this.currentRequest.resolve(move);
-                this.currentRequest = null;
-            }
-        }
-    }
-
-    private handleInfo(line: string): void {
-        // TODO: Implement info handling
     }
 
     private parseMove(moveString: string): StockfishMove {
@@ -164,7 +175,10 @@ export class StockfishService {
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 console.log(`[DEBUG] StockfishService.getBestMove: Timeout reached`);
-                reject(new Error('Stockfish move calculation timeout'));
+                if (this.currentRequest) {
+                    this.currentRequest.reject(new Error('Stockfish move calculation timeout'));
+                    this.currentRequest = null;
+                }
             }, timeLimit + 1000);
             
             this.currentRequest = { resolve, reject, timeout };
@@ -215,6 +229,7 @@ export class StockfishService {
     }
 
     public async stop(): Promise<void> {
+        this.clearInitializationTimeout();
         if (this.currentRequest) {
             clearTimeout(this.currentRequest.timeout);
             this.currentRequest.reject(new Error('Engine stopped'));
