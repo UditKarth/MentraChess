@@ -28,8 +28,6 @@ import {
     checkGameEnd,
     getLegalMoves,
     renderBoardString,
-    renderCompactBoardString,
-    renderUltraCompactBoardString,
     isInCheck
 } from '../chess_logic';
 import { StockfishService } from '../services/StockfishService';
@@ -55,14 +53,9 @@ export class ChessServer extends AppServer {
     private multiplayerGameManager?: MultiplayerGameManager;
 
     // Cache for board rendering to reduce latency
-    private boardCache: Map<string, { boardText: string; timestamp: number; useUnicode: boolean; displayMode: string }> = new Map();
+    private boardCache: Map<string, { boardText: string; timestamp: number; useUnicode: boolean }> = new Map();
     private cleanupInterval: NodeJS.Timeout | null = null;
     private readonly BOARD_CACHE_DURATION = 1000; // 1 second cache duration
-    
-    // Single text wall management for dynamic content switching
-    private textWallTimers: Map<string, NodeJS.Timeout> = new Map();
-    private readonly BOARD_RETURN_DELAY = 2000; // 2 seconds before returning to board
-    private readonly MESSAGE_DURATION = 3000; // 3 seconds for most messages
     
     // Command processing debounce
     private commandDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
@@ -433,7 +426,7 @@ export class ChessServer extends AppServer {
         }
     }
 
-    // Helper to update board and show feedback using single text wall or double text wall
+    // Helper to update board and feedback using DoubleTextWall
     private async updateBoardAndFeedback(sessionId: string, feedback: string) {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) {
@@ -446,40 +439,38 @@ export class ChessServer extends AppServer {
         if (process.env.NODE_ENV !== 'production') {
             console.log(`[DEBUG] updateBoardAndFeedback: Found game session for sessionId: ${sessionId}`);
         }
-        
         const { appSession, state } = gameSession;
         
-        // Check user preference for layout
-        const useSingleTextWall = appSession.settings.get<string>('use_single_text_wall', 'true');
-        const preferSingleTextWall = useSingleTextWall === 'true' || useSingleTextWall === 'TRUE' || useSingleTextWall === '1';
-        
         try {
-            if (preferSingleTextWall) {
-                // Use new single text wall approach
-                await this.showMessageOnSingleTextWall(sessionId, feedback, 3000);
-                if (process.env.NODE_ENV !== 'production') {
-                    console.log(`[DEBUG] updateBoardAndFeedback: Single text wall feedback shown successfully`);
-                }
-            } else {
-                // Use legacy double text wall approach
-                const boardText = this.getCachedBoardText(sessionId, state, appSession);
-                await appSession.layouts.showDoubleTextWall(boardText, feedback);
-                if (process.env.NODE_ENV !== 'production') {
-                    console.log(`[DEBUG] updateBoardAndFeedback: Double text wall feedback shown successfully`);
-                }
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[DEBUG] updateBoardAndFeedback: Getting cached board text`);
+            }
+            // Use cached board text for better performance
+            const boardText = this.getCachedBoardText(sessionId, state, appSession);
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[DEBUG] updateBoardAndFeedback: Board text length: ${boardText.length}`);
+            }
+            
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[DEBUG] updateBoardAndFeedback: Calling showDoubleTextWall`);
+            }
+            await appSession.layouts.showDoubleTextWall(boardText, feedback);
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[DEBUG] updateBoardAndFeedback: showDoubleTextWall completed successfully`);
             }
         } catch (error) {
-            console.error(`[DEBUG] updateBoardAndFeedback: Error showing feedback:`, error);
-            // Fallback: try to show board
-            if (preferSingleTextWall) {
-                await this.showBoardOnSingleTextWall(sessionId);
-            } else {
-                try {
-                    const boardText = this.getCachedBoardText(sessionId, state, appSession);
-                    await appSession.layouts.showTextWall(boardText, { durationMs: 0 });
-                } catch (fallbackError) {
-                    console.error(`[DEBUG] updateBoardAndFeedback: Fallback also failed:`, fallbackError);
+            console.error(`[DEBUG] updateBoardAndFeedback: Error updating board and feedback:`, error);
+            // Fallback: try to show just the feedback
+            try {
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`[DEBUG] updateBoardAndFeedback: Trying fallback with showTextWall`);
                 }
+                await appSession.layouts.showTextWall(feedback, { durationMs: 3000 });
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`[DEBUG] updateBoardAndFeedback: Fallback showTextWall completed`);
+                }
+            } catch (fallbackError) {
+                console.error(`[DEBUG] updateBoardAndFeedback: Fallback layout also failed:`, fallbackError);
             }
         }
     }
@@ -488,24 +479,16 @@ export class ChessServer extends AppServer {
     private async showLiveTranscription(sessionId: string, transcript: string) {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
-        
         const { appSession } = gameSession;
-        
-        // Check user preference for layout
-        const useSingleTextWall = appSession.settings.get<string>('use_single_text_wall', 'true');
-        const preferSingleTextWall = useSingleTextWall === 'true' || useSingleTextWall === 'TRUE' || useSingleTextWall === '1';
         
         try {
             // Use a very subtle approach for live transcription
             // Only show if the transcript is substantial enough (more than 2 characters)
             if (transcript.trim().length > 2) {
-                if (preferSingleTextWall) {
-                    // Show transcription briefly, then return to board
-                    await this.showMessageOnSingleTextWall(sessionId, transcript, 1500); // 1.5 seconds
-                } else {
-                    // Use legacy approach for double text wall
-                    await appSession.layouts.showTextWall(transcript, { durationMs: 1000 });
-                }
+                // Use a very short duration to avoid interference with main UI
+                await appSession.layouts.showTextWall(transcript, { 
+                    durationMs: 1000 // Very short duration
+                });
             }
         } catch (error) {
             // Silently ignore live transcription errors to avoid spam
@@ -526,16 +509,13 @@ export class ChessServer extends AppServer {
         // Get user preferences from settings (cache this too if needed)
         const useUnicodeSetting = appSession.settings.get<string>('use_unicode', 'true');
         const useUnicode = useUnicodeSetting === 'true' || useUnicodeSetting === 'TRUE' || useUnicodeSetting === '1';
-        const displayModeSetting = appSession.settings.get<string>('compact_board_display', 'compact');
         if (process.env.NODE_ENV !== 'production') {
             console.log(`[DEBUG] getCachedBoardText: useUnicode setting: ${useUnicodeSetting}, resolved: ${useUnicode}`);
-            console.log(`[DEBUG] getCachedBoardText: display mode setting: ${displayModeSetting}`);
         }
         
         // Check if we have a valid cached version
         if (cached && 
             cached.useUnicode === useUnicode && 
-            cached.displayMode === displayModeSetting &&
             (now - cached.timestamp) < this.BOARD_CACHE_DURATION) {
             if (process.env.NODE_ENV !== 'production') {
                 console.log(`[DEBUG] getCachedBoardText: Using cached board text, length: ${cached.boardText.length}`);
@@ -546,30 +526,17 @@ export class ChessServer extends AppServer {
         if (process.env.NODE_ENV !== 'production') {
             console.log(`[DEBUG] getCachedBoardText: Generating new board text`);
         }
-        // Generate new board text based on display mode
-        let boardText: string;
-        switch (displayModeSetting) {
-            case 'ultra_compact':
-                boardText = renderUltraCompactBoardString(state, { useUnicode });
-                break;
-            case 'compact':
-                boardText = renderCompactBoardString(state, { useUnicode });
-                break;
-            case 'full':
-            default:
-                boardText = renderBoardString(state, { useUnicode });
-                break;
-        }
+        // Generate new board text
+        const boardText = renderBoardString(state, { useUnicode });
         if (process.env.NODE_ENV !== 'production') {
-            console.log(`[DEBUG] getCachedBoardText: Generated ${displayModeSetting} board text length: ${boardText.length}`);
+            console.log(`[DEBUG] getCachedBoardText: Generated board text length: ${boardText.length}`);
         }
         
         // Cache the result
         this.boardCache.set(cacheKey, {
             boardText,
             timestamp: now,
-            useUnicode,
-            displayMode: displayModeSetting
+            useUnicode
         });
         
         // Clean up old cache entries
@@ -1046,27 +1013,12 @@ export class ChessServer extends AppServer {
         }
 
         console.log(`[DEBUG] startGame: Found game session for sessionId: ${sessionId}`);
-        const { appSession, state } = gameSession;
-        
-        // Check user preference for layout
-        const useSingleTextWall = appSession.settings.get<string>('use_single_text_wall', 'true');
-        const preferSingleTextWall = useSingleTextWall === 'true' || useSingleTextWall === 'TRUE' || useSingleTextWall === '1';
+        const { state } = gameSession;
         
         try {
-            if (preferSingleTextWall) {
-                // Show initial board display
-                console.log(`[DEBUG] startGame: Showing initial board (single text wall)`);
-                await this.showBoardOnSingleTextWall(sessionId);
-                
-                // Show game start message briefly
-                console.log(`[DEBUG] startGame: Showing game start message`);
-                await this.showMessageOnSingleTextWall(sessionId, 'Game started!', 2000);
-                console.log(`[DEBUG] startGame: Game start message shown`);
-            } else {
-                // Use legacy approach
-                console.log(`[DEBUG] startGame: Using legacy double text wall approach`);
-                await this.updateBoardAndFeedback(sessionId, 'Game started!');
-            }
+            console.log(`[DEBUG] startGame: Calling updateBoardAndFeedback`);
+            await this.updateBoardAndFeedback(sessionId, 'Game started!');
+            console.log(`[DEBUG] startGame: updateBoardAndFeedback completed`);
 
             // Determine first player
             if (state.userColor === PlayerColor.BLACK) {
@@ -1088,7 +1040,7 @@ export class ChessServer extends AppServer {
     private async promptUserMove(sessionId: string): Promise<void> {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) return;
-        const { appSession, state } = gameSession;
+        const { state } = gameSession;
         
         // Update check status for current player
         state.isCheck = isInCheck(state.board, state.currentPlayer);
@@ -1108,21 +1060,7 @@ export class ChessServer extends AppServer {
             feedback += "\nAI is in check!";
         }
         
-        // Check user preference for layout
-        const useSingleTextWall = appSession.settings.get<string>('use_single_text_wall', 'true');
-        const preferSingleTextWall = useSingleTextWall === 'true' || useSingleTextWall === 'TRUE' || useSingleTextWall === '1';
-        
-        if (preferSingleTextWall) {
-            // Update board display first
-            await this.updateBoardDisplay(sessionId);
-            
-            // Show turn message briefly
-            await this.showMessageOnSingleTextWall(sessionId, `${turnText}\n${feedback}`, 2500);
-        } else {
-            // Use legacy approach
-            await this.updateBoardAndFeedback(sessionId, `${turnText}\n${feedback}`);
-        }
-        
+        await this.updateBoardAndFeedback(sessionId, `${turnText}\n${feedback}`);
         this.updateDashboardContent(sessionId);
     }
 
@@ -2050,70 +1988,5 @@ export class ChessServer extends AppServer {
         console.log('[ChessServer] Command debounce timers cleared for tests');
         
         // Note: We intentionally don't call super.stop() to avoid process.exit()
-    }
-
-    /**
-     * Shows a message on the single text wall and returns to board after delay
-     */
-    private async showMessageOnSingleTextWall(sessionId: string, message: string, durationMs?: number): Promise<void> {
-        const gameSession = this.sessionManager.getSession(sessionId);
-        if (!gameSession) return;
-        
-        const { appSession } = gameSession;
-        const displayDuration = durationMs || this.MESSAGE_DURATION;
-        
-        try {
-            // Clear any existing timer for this session
-            const existingTimer = this.textWallTimers.get(sessionId);
-            if (existingTimer) {
-                clearTimeout(existingTimer);
-            }
-            
-            // Show the message
-            await appSession.layouts.showTextWall(message, { durationMs: displayDuration });
-            
-            // Set timer to return to board
-            const returnTimer = setTimeout(async () => {
-                await this.showBoardOnSingleTextWall(sessionId);
-                this.textWallTimers.delete(sessionId);
-            }, displayDuration + 500); // Add small buffer
-            
-            this.textWallTimers.set(sessionId, returnTimer);
-            
-        } catch (error) {
-            console.error(`[DEBUG] showMessageOnSingleTextWall: Error showing message:`, error);
-            // Fallback: try to show board immediately
-            await this.showBoardOnSingleTextWall(sessionId);
-        }
-    }
-
-    /**
-     * Shows the board on the single text wall
-     */
-    private async showBoardOnSingleTextWall(sessionId: string): Promise<void> {
-        const gameSession = this.sessionManager.getSession(sessionId);
-        if (!gameSession) return;
-        
-        const { appSession, state } = gameSession;
-        
-        try {
-            const boardText = this.getCachedBoardText(sessionId, state, appSession);
-            await appSession.layouts.showTextWall(boardText, { durationMs: 0 }); // 0 = persistent
-        } catch (error) {
-            console.error(`[DEBUG] showBoardOnSingleTextWall: Error showing board:`, error);
-        }
-    }
-
-    /**
-     * Updates the board display (called when board state changes)
-     */
-    private async updateBoardDisplay(sessionId: string): Promise<void> {
-        const gameSession = this.sessionManager.getSession(sessionId);
-        if (!gameSession) return;
-        
-        // Only update if no message is currently being shown
-        if (!this.textWallTimers.has(sessionId)) {
-            await this.showBoardOnSingleTextWall(sessionId);
-        }
     }
 } 
