@@ -114,6 +114,7 @@ export class StockfishService {
             
             if (line === 'readyok') {
                 this.isReady = true;
+                this.isInitialized = true;
                 this.clearInitializationTimeout();
                 console.log('✅ Stockfish engine is ready');
             } else if (line.startsWith('bestmove')) {
@@ -226,6 +227,10 @@ export class StockfishService {
 
     public isEngineReady(): boolean {
         return this.isReady;
+    }
+
+    public isEngineInitialized(): boolean {
+        return this.isInitialized;
     }
 
     public async stop(): Promise<void> {
