@@ -88,6 +88,25 @@
       "description": "Highlight the squares of the last move made"
     },
     {
+      "key": "compact_board_display",
+      "type": "select",
+      "label": "Board Display Mode",
+      "defaultValue": "compact",
+      "options": [
+        { "label": "Full Display", "value": "full" },
+        { "label": "Compact Display", "value": "compact" },
+        { "label": "Ultra-Compact Display", "value": "ultra_compact" }
+      ],
+      "description": "Choose board display mode for different screen sizes"
+    },
+    {
+      "key": "use_single_text_wall",
+      "type": "toggle",
+      "label": "Use Single Text Wall Layout",
+      "defaultValue": true,
+      "description": "Use dynamic single text wall (recommended) or side-by-side double text wall"
+    },
+    {
       "type": "group",
       "title": "Voice Settings"
     },
