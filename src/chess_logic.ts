@@ -1077,8 +1077,7 @@ export function renderBoardString(
         highlightLastMove?: boolean,
         showCapturedPieces?: boolean,
         showMoveHistory?: boolean,
-        useUnicode?: boolean,
-        compactMode?: boolean
+        useUnicode?: boolean
     }
 ): string {
     const { board, userColor, capturedByWhite, capturedByBlack, lastMove } = state;
@@ -1089,7 +1088,6 @@ export function renderBoardString(
     const showCapturedPieces = options?.showCapturedPieces ?? true;
     const showMoveHistory = options?.showMoveHistory ?? false;
     const useUnicode = options?.useUnicode ?? true;
-    const compactMode = options?.compactMode ?? false;
 
     // Unicode chess piece mapping
     const unicodeMap: Record<string, string> = {
@@ -1108,7 +1106,7 @@ export function renderBoardString(
     let boardStr = "";
 
     // 1. Captured pieces by the opponent (displayed at the top)
-    if (showCapturedPieces && !compactMode) {
+    if (showCapturedPieces) {
         const opponentCaptured = flipBoard ? capturedByWhite : capturedByBlack;
         if (opponentCaptured.length > 0) {
             boardStr += `Opponent captures: ${opponentCaptured.map(p => unicodeMap[p] || p).join(' ')}\n`;
@@ -1133,7 +1131,7 @@ export function renderBoardString(
                 cell = useUnicode ? (unicodeMap[piece] || piece) : piece;
             }
             // Highlight last move (optional, can be improved for Unicode)
-            if (highlightLastMove && lastMove && !compactMode) {
+            if (highlightLastMove && lastMove) {
                 const [lastFromRow, lastFromCol] = lastMove.from;
                 const [lastToRow, lastToCol] = lastMove.to;
                 if ((displayRow === lastFromRow && displayCol === lastFromCol) ||
@@ -1143,7 +1141,7 @@ export function renderBoardString(
                 }
             }
             // Use different spacing for pieces vs squares
-            const spacing = compactMode ? ' ' : (piece === ' ' ? squareSpacing : pieceSpacing);
+            const spacing = piece === ' ' ? squareSpacing : pieceSpacing;
             rowStr += cell + spacing;
         }
         boardStr += rowStr.trimEnd() + '\n';
@@ -1151,17 +1149,17 @@ export function renderBoardString(
 
     // 3. File labels
     if (showCoordinates) {
-        boardStr += compactMode ? ' ' : '  ';
+        boardStr += '  ';
         for (let c = 0; c < 8; c++) {
             // Use reduced spacing between file labels
-            const labelSpacing = compactMode ? ' ' : '  '; // Reduced spacing in compact mode
+            const labelSpacing = '  '; // Two spaces between letters
             boardStr += `${labelSpacing}${FILES[c]}`;
         }
         boardStr += '\n';
     }
 
     // 4. Captured pieces by the user (displayed at the bottom)
-    if (showCapturedPieces && !compactMode) {
+    if (showCapturedPieces) {
         const userCaptured = flipBoard ? capturedByBlack : capturedByWhite;
         if (userCaptured.length > 0) {
             boardStr += "-----------------------------------\n";
@@ -1172,7 +1170,7 @@ export function renderBoardString(
     }
 
     // 5. Move history (if enabled and in expanded dashboard mode)
-    if (showMoveHistory && state.moveHistory.length > 0 && !compactMode) {
+    if (showMoveHistory && state.moveHistory.length > 0) {
         const recentMoves = state.moveHistory.slice(-6);
         boardStr += "-----------------------------------\n";
         boardStr += "Recent moves:\n";

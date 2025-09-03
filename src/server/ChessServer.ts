@@ -426,7 +426,7 @@ export class ChessServer extends AppServer {
         }
     }
 
-    // Helper to update board and feedback using DoubleTextWall with fallback
+    // Helper to update board and feedback using DoubleTextWall
     private async updateBoardAndFeedback(sessionId: string, feedback: string) {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) {
@@ -441,29 +441,16 @@ export class ChessServer extends AppServer {
         }
         const { appSession, state } = gameSession;
         
-        // Get board text first so it's available for fallbacks
-        let boardText: string;
         try {
             if (process.env.NODE_ENV !== 'production') {
                 console.log(`[DEBUG] updateBoardAndFeedback: Getting cached board text`);
             }
             // Use cached board text for better performance
-            boardText = this.getCachedBoardText(sessionId, state, appSession);
+            const boardText = this.getCachedBoardText(sessionId, state, appSession);
             if (process.env.NODE_ENV !== 'production') {
                 console.log(`[DEBUG] updateBoardAndFeedback: Board text length: ${boardText.length}`);
             }
-        } catch (error) {
-            console.error(`[DEBUG] updateBoardAndFeedback: Error getting board text:`, error);
-            // If we can't get board text, just show feedback
-            try {
-                await appSession.layouts.showTextWall(feedback, { durationMs: 3000 });
-            } catch (fallbackError) {
-                console.error(`[DEBUG] updateBoardAndFeedback: Failed to show feedback:`, fallbackError);
-            }
-            return;
-        }
-        
-        try {
+            
             if (process.env.NODE_ENV !== 'production') {
                 console.log(`[DEBUG] updateBoardAndFeedback: Calling showDoubleTextWall`);
             }
@@ -473,24 +460,17 @@ export class ChessServer extends AppServer {
             }
         } catch (error) {
             console.error(`[DEBUG] updateBoardAndFeedback: Error updating board and feedback:`, error);
-            // Fallback: try TextWall with combined board and feedback
+            // Fallback: try to show just the feedback
             try {
                 if (process.env.NODE_ENV !== 'production') {
                     console.log(`[DEBUG] updateBoardAndFeedback: Trying fallback with showTextWall`);
                 }
-                const combinedText = boardText + "\n\n" + feedback;
-                await appSession.layouts.showTextWall(combinedText, { durationMs: 8000 });
+                await appSession.layouts.showTextWall(feedback, { durationMs: 3000 });
                 if (process.env.NODE_ENV !== 'production') {
                     console.log(`[DEBUG] updateBoardAndFeedback: Fallback showTextWall completed`);
                 }
             } catch (fallbackError) {
                 console.error(`[DEBUG] updateBoardAndFeedback: Fallback layout also failed:`, fallbackError);
-                // Final fallback: just show feedback
-                try {
-                    await appSession.layouts.showTextWall(feedback, { durationMs: 3000 });
-                } catch (finalError) {
-                    console.error(`[DEBUG] updateBoardAndFeedback: All layout methods failed:`, finalError);
-                }
             }
         }
     }
@@ -546,8 +526,8 @@ export class ChessServer extends AppServer {
         if (process.env.NODE_ENV !== 'production') {
             console.log(`[DEBUG] getCachedBoardText: Generating new board text`);
         }
-        // Generate new board text with compact mode to handle layout constraints
-        const boardText = renderBoardString(state, { useUnicode, compactMode: true });
+        // Generate new board text
+        const boardText = renderBoardString(state, { useUnicode });
         if (process.env.NODE_ENV !== 'production') {
             console.log(`[DEBUG] getCachedBoardText: Generated board text length: ${boardText.length}`);
         }
