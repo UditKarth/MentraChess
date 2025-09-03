@@ -1652,10 +1652,14 @@ export class ChessServer extends AppServer {
 
         // Update captured pieces
         if (capturedPiece !== ' ') {
-            if (state.userColor === PlayerColor.WHITE) {
-                state.capturedByWhite.push(capturedPiece);
-            } else {
+            // Add captured piece to the array of the color that captured it
+            // Since pieces can only be captured by the opposite color, use the piece's color
+            if (capturedPiece === capturedPiece.toUpperCase()) {
+                // White piece was captured, add to Black's captures
                 state.capturedByBlack.push(capturedPiece);
+            } else {
+                // Black piece was captured, add to White's captures
+                state.capturedByWhite.push(capturedPiece);
             }
         }
 
@@ -1817,10 +1821,14 @@ export class ChessServer extends AppServer {
 
         // Update captured pieces
         if (capturedPiece !== ' ') {
-            if (aiColor === PlayerColor.BLACK) {
-                state.capturedByWhite.push(capturedPiece);
-            } else {
+            // Add captured piece to the array of the color that captured it
+            // Since pieces can only be captured by the opposite color, use the piece's color
+            if (capturedPiece === capturedPiece.toUpperCase()) {
+                // White piece was captured, add to Black's captures
                 state.capturedByBlack.push(capturedPiece);
+            } else {
+                // Black piece was captured, add to White's captures
+                state.capturedByWhite.push(capturedPiece);
             }
         }
 

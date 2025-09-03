@@ -153,10 +153,14 @@ export class MultiplayerGameManager {
 
     // Update captured pieces
     if (capturedPiece !== ' ') {
-      if (game.currentState.currentPlayer === PlayerColor.WHITE) {
-        game.currentState.capturedByWhite.push(capturedPiece);
-      } else {
+      // Add captured piece to the array of the color that captured it
+      // Since pieces can only be captured by the opposite color, use the piece's color
+      if (capturedPiece === capturedPiece.toUpperCase()) {
+        // White piece was captured, add to Black's captures
         game.currentState.capturedByBlack.push(capturedPiece);
+      } else {
+        // Black piece was captured, add to White's captures
+        game.currentState.capturedByWhite.push(capturedPiece);
       }
     }
 
@@ -234,10 +238,14 @@ export class MultiplayerGameManager {
 
     // Update captured pieces
     if (capturedPiece !== ' ') {
-      if (game.currentState.currentPlayer === PlayerColor.WHITE) {
-        game.currentState.capturedByWhite.push(capturedPiece);
-      } else {
+      // Add captured piece to the array of the color that captured it
+      // Since pieces can only be captured by the opposite color, use the piece's color
+      if (capturedPiece === capturedPiece.toUpperCase()) {
+        // White piece was captured, add to Black's captures
         game.currentState.capturedByBlack.push(capturedPiece);
+      } else {
+        // Black piece was captured, add to White's captures
+        game.currentState.capturedByWhite.push(capturedPiece);
       }
     }
 
