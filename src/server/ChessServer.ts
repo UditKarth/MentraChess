@@ -509,16 +509,16 @@ export class ChessServer extends AppServer {
         if (capturedByWhite.length > 0 || capturedByBlack.length > 0) {
             combinedContent += '\n\n-----------------------------------';
             
-            // Show opponent's captures (pieces you've taken)
-            const opponentCaptured = userColor === PlayerColor.WHITE ? capturedByBlack : capturedByWhite;
-            if (opponentCaptured.length > 0) {
-                combinedContent += `\nOpponent captures: ${opponentCaptured.join(' ')}`;
+            // Show pieces you've captured from opponent
+            const piecesYouCaptured = userColor === PlayerColor.WHITE ? capturedByWhite : capturedByBlack;
+            if (piecesYouCaptured.length > 0) {
+                combinedContent += `\nPieces you captured: ${piecesYouCaptured.join(' ')}`;
             }
             
-            // Show your captures (pieces opponent has taken)
-            const userCaptured = userColor === PlayerColor.WHITE ? capturedByWhite : capturedByBlack;
-            if (userCaptured.length > 0) {
-                combinedContent += `\nYour captures: ${userCaptured.join(' ')}`;
+            // Show pieces opponent has captured from you
+            const piecesOpponentCaptured = userColor === PlayerColor.WHITE ? capturedByBlack : capturedByWhite;
+            if (piecesOpponentCaptured.length > 0) {
+                combinedContent += `\nPieces opponent captured: ${piecesOpponentCaptured.join(' ')}`;
             }
         }
         
