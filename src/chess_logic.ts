@@ -1080,13 +1080,11 @@ export function renderBoardString(
         useUnicode?: boolean
     }
 ): string {
-    const { board, userColor, capturedByWhite, capturedByBlack, lastMove } = state;
+    const { board, userColor, lastMove } = state;
     // Defaults (can be overridden by options)
     const flipBoard = options?.flipBoard ?? (userColor === PlayerColor.BLACK);
     const showCoordinates = options?.showCoordinates ?? true;
     const highlightLastMove = options?.highlightLastMove ?? true;
-    const showCapturedPieces = options?.showCapturedPieces ?? true;
-    const showMoveHistory = options?.showMoveHistory ?? false;
     const useUnicode = options?.useUnicode ?? true;
 
     // Unicode chess piece mapping
@@ -1104,17 +1102,6 @@ export function renderBoardString(
     const squareSpacing = ' '; // Always use single space for squares
 
     let boardStr = "";
-
-    // 1. Captured pieces by the opponent (displayed at the top)
-    if (showCapturedPieces) {
-        const opponentCaptured = flipBoard ? capturedByWhite : capturedByBlack;
-        if (opponentCaptured.length > 0) {
-            boardStr += `Opponent captures: ${opponentCaptured.map(p => unicodeMap[p] || p).join(' ')}\n`;
-            boardStr += "-----------------------------------\n";
-        } else {
-            boardStr += "\n\n";
-        }
-    }
 
     // 2. Board ranks and pieces (Unicode/ASCII rendering)
     for (let r = 0; r < 8; r++) {
@@ -1158,35 +1145,7 @@ export function renderBoardString(
         boardStr += '\n';
     }
 
-    // 4. Captured pieces by the user (displayed at the bottom)
-    if (showCapturedPieces) {
-        const userCaptured = flipBoard ? capturedByBlack : capturedByWhite;
-        if (userCaptured.length > 0) {
-            boardStr += "-----------------------------------\n";
-            boardStr += `Your captures: ${userCaptured.map(p => unicodeMap[p] || p).join(' ')}\n`;
-        } else {
-            boardStr += "\n\n";
-        }
-    }
 
-    // 5. Move history (if enabled and in expanded dashboard mode)
-    if (showMoveHistory && state.moveHistory.length > 0) {
-        const recentMoves = state.moveHistory.slice(-6);
-        boardStr += "-----------------------------------\n";
-        boardStr += "Recent moves:\n";
-        recentMoves.forEach((move, index) => {
-            const moveNumber = Math.floor(index / 2) + 1;
-            const isWhiteMove = index % 2 === 0;
-            if (isWhiteMove) {
-                boardStr += `${moveNumber}. ${move.algebraic}`;
-            } else {
-                boardStr += ` ${move.algebraic}\n`;
-            }
-        });
-        if (recentMoves.length % 2 === 1) {
-            boardStr += "\n";
-        }
-    }
     return boardStr.trim();
 }
 

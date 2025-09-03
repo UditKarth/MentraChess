@@ -384,15 +384,7 @@ export class ChessServer extends AppServer {
                     }
                 }
 
-                // Add game statistics
-                if (showCapturedPieces) {
-                    const userCaptured = state.userColor === PlayerColor.WHITE ? state.capturedByWhite : state.capturedByBlack;
-                    const aiCaptured = state.userColor === PlayerColor.WHITE ? state.capturedByBlack : state.capturedByWhite;
-                    
-                    if (userCaptured.length > 0 || aiCaptured.length > 0) {
-                        expandedContent += `\n\nCaptured Pieces:\nYou: ${userCaptured.join(' ')}\nAI: ${aiCaptured.join(' ')}`;
-                    }
-                }
+                // Note: Captured pieces are now shown in the main board view with the combined content
 
                 // Add move count
                 expandedContent += `\n\nMove: ${state.fullmoveNumber}`;
@@ -426,7 +418,7 @@ export class ChessServer extends AppServer {
         }
     }
 
-    // Helper to update board and feedback using DoubleTextWall
+    // Helper to update board and feedback using TextWall with combined content (replaced DoubleTextWall)
     private async updateBoardAndFeedback(sessionId: string, feedback: string) {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) {
@@ -451,12 +443,15 @@ export class ChessServer extends AppServer {
                 console.log(`[DEBUG] updateBoardAndFeedback: Board text length: ${boardText.length}`);
             }
             
+            // Combine board text with feedback and additional guidance
+            const combinedContent = this.createCombinedBoardContent(boardText, feedback, state);
+            
             if (process.env.NODE_ENV !== 'production') {
-                console.log(`[DEBUG] updateBoardAndFeedback: Calling showDoubleTextWall`);
+                console.log(`[DEBUG] updateBoardAndFeedback: Calling showTextWall with combined content`);
             }
-            await appSession.layouts.showDoubleTextWall(boardText, feedback);
+            await appSession.layouts.showTextWall(combinedContent);
             if (process.env.NODE_ENV !== 'production') {
-                console.log(`[DEBUG] updateBoardAndFeedback: showDoubleTextWall completed successfully`);
+                console.log(`[DEBUG] updateBoardAndFeedback: showTextWall completed successfully`);
             }
         } catch (error) {
             console.error(`[DEBUG] updateBoardAndFeedback: Error updating board and feedback:`, error);
@@ -498,6 +493,59 @@ export class ChessServer extends AppServer {
         }
     }
 
+    /**
+     * Create combined board content with board, feedback, and additional guidance
+     */
+    private createCombinedBoardContent(boardText: string, feedback: string, state: SessionState): string {
+        let combinedContent = boardText;
+        
+        // Add feedback if provided
+        if (feedback && feedback.trim()) {
+            combinedContent += '\n\n' + feedback;
+        }
+        
+        // Add captured pieces information
+        const { capturedByWhite, capturedByBlack, userColor } = state;
+        if (capturedByWhite.length > 0 || capturedByBlack.length > 0) {
+            combinedContent += '\n\n-----------------------------------';
+            
+            // Show opponent's captures (pieces you've taken)
+            const opponentCaptured = userColor === PlayerColor.WHITE ? capturedByBlack : capturedByWhite;
+            if (opponentCaptured.length > 0) {
+                combinedContent += `\nOpponent captures: ${opponentCaptured.join(' ')}`;
+            }
+            
+            // Show your captures (pieces opponent has taken)
+            const userCaptured = userColor === PlayerColor.WHITE ? capturedByWhite : capturedByBlack;
+            if (userCaptured.length > 0) {
+                combinedContent += `\nYour captures: ${userCaptured.join(' ')}`;
+            }
+        }
+        
+        // Add current turn information
+        const turnText = state.currentPlayer === state.userColor ? "Your turn!" : "Opponent's turn";
+        combinedContent += `\n\n${turnText}`;
+        
+        // Add game status indicators
+        if (state.isCheck) {
+            combinedContent += '\n⚠️ CHECK!';
+        }
+        if (state.isCheckmate) {
+            combinedContent += '\n🏁 CHECKMATE!';
+        }
+        if (state.isStalemate) {
+            combinedContent += '\n🤝 STALEMATE!';
+        }
+        
+        // Add move count
+        combinedContent += `\nMove: ${state.fullmoveNumber}`;
+        
+        // Add voice command hints
+        combinedContent += '\n\nVoice Commands: "rook to d4", "pawn e5", "castle kingside"';
+        
+        return combinedContent;
+    }
+
     private getCachedBoardText(sessionId: string, state: SessionState, appSession: AppSession): string {
         if (process.env.NODE_ENV !== 'production') {
             console.log(`[DEBUG] getCachedBoardText: Starting for sessionId: ${sessionId}`);
@@ -526,7 +574,7 @@ export class ChessServer extends AppServer {
         if (process.env.NODE_ENV !== 'production') {
             console.log(`[DEBUG] getCachedBoardText: Generating new board text`);
         }
-        // Generate new board text
+        // Generate new board text (without captured pieces - they're now in combined content)
         const boardText = renderBoardString(state, { useUnicode });
         if (process.env.NODE_ENV !== 'production') {
             console.log(`[DEBUG] getCachedBoardText: Generated board text length: ${boardText.length}`);
