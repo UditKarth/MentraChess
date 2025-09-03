@@ -549,6 +549,20 @@ export class ChessServer extends AppServer {
             combinedContent += `\nMove: ${state.fullmoveNumber}`;
         }
         
+        // Add command help when not in an active game
+        if (state.mode === SessionMode.INITIALIZING || 
+            state.mode === SessionMode.CHOOSING_GAME_MODE ||
+            state.mode === SessionMode.CHOOSING_COLOR ||
+            state.mode === SessionMode.CHOOSING_DIFFICULTY ||
+            state.mode === SessionMode.CHOOSING_OPPONENT ||
+            state.mode === SessionMode.GAME_OVER) {
+            combinedContent += '\n\n🎮 Game Commands:';
+            combinedContent += '\n• "AI" - Start an AI-based game';
+            combinedContent += '\n• "Multiplayer" - Start a multiplayer game';
+            combinedContent += '\n• "White" or "Black" - Choose your color';
+            combinedContent += '\n• "Easy", "Medium", "Hard" - Set AI difficulty';
+        }
+        
         // Add voice command hints
         combinedContent += '\n\nVoice Commands: "rook to d4", "pawn e5", "castle kingside"';
         
