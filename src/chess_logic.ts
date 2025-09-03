@@ -91,7 +91,13 @@ export function coordsToAlgebraic(coords: Coordinates): string {
  * @returns Object with piece type (lowercase) and target square, or null.
  */
 export function parseMoveTranscript(transcript: string): { piece: string; target: string } | null {
-    transcript = transcript.toLowerCase().replace(/[.]/g, ''); // Remove periods
+    // Remove all punctuation including commas, periods, etc. and clean up the transcript
+    transcript = transcript.toLowerCase()
+        .replace(/[,.]/g, '') // Remove commas and periods
+        .replace(/[^\w\s]/g, '') // Remove all other punctuation
+        .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
+        .trim();
+    
     // Fix common voice misrecognition: 'pond' -> 'pawn', 'night' -> 'knight'
     transcript = transcript.replace(/\bpond\b/g, 'pawn');
     transcript = transcript.replace(/\bnight\b/g, 'knight');
@@ -144,9 +150,12 @@ export function parseMoveTranscript(transcript: string): { piece: string; target
  * @returns The selected number (1-based index) or null.
  */
 export function parseClarificationTranscript(transcript: string): number | null {
-    // Clean up transcript: lowercase, trim, remove common prefixes and non-alphanumerics except digits
-    let lower = transcript.toLowerCase().trim().replace(/^(number|option)\s*/, '');
-    lower = lower.replace(/[^a-z0-9 ]/g, '');
+    // Clean up transcript: remove all punctuation, lowercase, trim, remove common prefixes
+    let lower = transcript.toLowerCase()
+        .replace(/[,.]/g, '') // Remove commas and periods
+        .replace(/[^\w\s]/g, '') // Remove all other punctuation
+        .trim()
+        .replace(/^(number|option)\s*/, '');
     lower = lower.replace(/\s+/g, ' ');
     // Map common misrecognitions
     const numberMap: { [key: string]: number } = {
@@ -1030,7 +1039,12 @@ export function updateCastlingRights(
  * @returns 'kingside', 'queenside', or null if not a castling command.
  */
 export function parseCastlingTranscript(transcript: string): 'kingside' | 'queenside' | null {
-    const lower = transcript.toLowerCase().trim();
+    // Remove all punctuation and clean up the transcript
+    const lower = transcript.toLowerCase()
+        .replace(/[,.]/g, '') // Remove commas and periods
+        .replace(/[^\w\s]/g, '') // Remove all other punctuation
+        .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
+        .trim();
     
     // Queenside castling (check first to avoid 'ooo' matching kingside)
     if (lower.includes('queenside') || lower.includes('queen side') || 

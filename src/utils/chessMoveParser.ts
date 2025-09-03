@@ -11,8 +11,13 @@ interface ChessMove {
 }
 
 export function parseChessMove(text: string): ChessMove | null {
-  // Convert to lowercase and remove extra spaces
-  let cleanText = text.toLowerCase().trim();
+  // Remove all punctuation including commas, periods, etc. and clean up the transcript
+  let cleanText = text.toLowerCase()
+    .replace(/[,.]/g, '') // Remove commas and periods
+    .replace(/[^\w\s]/g, '') // Remove all other punctuation
+    .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
+    .trim();
+  
   // Fix common voice misrecognition: 'pond' -> 'pawn', 'night' -> 'knight'
   cleanText = cleanText.replace(/\bpond\b/g, 'pawn');
   cleanText = cleanText.replace(/\bnight\b/g, 'knight');
