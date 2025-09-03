@@ -91,12 +91,18 @@ export function coordsToAlgebraic(coords: Coordinates): string {
  * @returns Object with piece type (lowercase) and target square, or null.
  */
 export function parseMoveTranscript(transcript: string): { piece: string; target: string } | null {
-    // Remove all punctuation including commas, periods, etc. and clean up the transcript
+    // Remove specific punctuation that interferes with move parsing, but preserve algebraic notation
+    const originalTranscript = transcript;
     transcript = transcript.toLowerCase()
         .replace(/[,.]/g, '') // Remove commas and periods
-        .replace(/[^\w\s]/g, '') // Remove all other punctuation
+        .replace(/[^\w\s0-9]/g, '') // Remove punctuation but preserve letters, spaces, and digits
         .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
         .trim();
+    
+    // Debug logging to help troubleshoot parsing issues
+    if (process.env.NODE_ENV !== 'production') {
+        console.log(`[parseMoveTranscript] Original: "${originalTranscript}" -> Cleaned: "${transcript}"`);
+    }
     
     // Fix common voice misrecognition: 'pond' -> 'pawn', 'night' -> 'knight'
     transcript = transcript.replace(/\bpond\b/g, 'pawn');
@@ -104,7 +110,13 @@ export function parseMoveTranscript(transcript: string): { piece: string; target
 
     // More flexible regex to capture piece name and algebraic notation
     // Allows for "to", optional space, or just piece + square
+    // Pattern: (piece_name) + optional "to" + (algebraic_square)
     const match = transcript.match(/(pawn|pond|rook|knight|night|bishop|queen|king)\s*(?:to\s*)?([a-h][1-8])/);
+
+    // Debug logging to help troubleshoot regex matching
+    if (process.env.NODE_ENV !== 'production') {
+        console.log(`[parseMoveTranscript] Regex match result:`, match);
+    }
 
     if (match) {
         const pieceName = match[1];
@@ -135,8 +147,15 @@ export function parseMoveTranscript(transcript: string): { piece: string; target
         // Note: findPossibleMoves will need to handle the case-sensitivity based on player color.
 
         if (pieceChar && targetSquare) {
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[parseMoveTranscript] Successfully parsed: piece=${pieceChar}, target=${targetSquare}`);
+            }
             return { piece: pieceChar, target: targetSquare };
         }
+    }
+    
+    if (process.env.NODE_ENV !== 'production') {
+        console.log(`[parseMoveTranscript] Failed to parse transcript: "${transcript}"`);
     }
     return null;
 }
@@ -150,10 +169,10 @@ export function parseMoveTranscript(transcript: string): { piece: string; target
  * @returns The selected number (1-based index) or null.
  */
 export function parseClarificationTranscript(transcript: string): number | null {
-    // Clean up transcript: remove all punctuation, lowercase, trim, remove common prefixes
+    // Clean up transcript: remove specific punctuation but preserve digits, lowercase, trim, remove common prefixes
     let lower = transcript.toLowerCase()
         .replace(/[,.]/g, '') // Remove commas and periods
-        .replace(/[^\w\s]/g, '') // Remove all other punctuation
+        .replace(/[^\w\s0-9]/g, '') // Remove punctuation but preserve letters, spaces, and digits
         .trim()
         .replace(/^(number|option)\s*/, '');
     lower = lower.replace(/\s+/g, ' ');
@@ -1039,10 +1058,10 @@ export function updateCastlingRights(
  * @returns 'kingside', 'queenside', or null if not a castling command.
  */
 export function parseCastlingTranscript(transcript: string): 'kingside' | 'queenside' | null {
-    // Remove all punctuation and clean up the transcript
+    // Remove specific punctuation but preserve letters and spaces
     const lower = transcript.toLowerCase()
         .replace(/[,.]/g, '') // Remove commas and periods
-        .replace(/[^\w\s]/g, '') // Remove all other punctuation
+        .replace(/[^\w\s]/g, '') // Remove punctuation but preserve letters and spaces
         .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
         .trim();
     

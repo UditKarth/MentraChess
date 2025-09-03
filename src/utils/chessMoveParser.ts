@@ -11,10 +11,10 @@ interface ChessMove {
 }
 
 export function parseChessMove(text: string): ChessMove | null {
-  // Remove all punctuation including commas, periods, etc. and clean up the transcript
+  // Remove specific punctuation that interferes with move parsing, but preserve algebraic notation
   let cleanText = text.toLowerCase()
     .replace(/[,.]/g, '') // Remove commas and periods
-    .replace(/[^\w\s]/g, '') // Remove all other punctuation
+    .replace(/[^\w\s0-9]/g, '') // Remove punctuation but preserve letters, spaces, and digits
     .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
     .trim();
   
