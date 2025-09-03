@@ -233,7 +233,7 @@ export class GameStatusDisplay {
         break;
     }
 
-    expandedContent += '\n\nSay "new game" to start a new game.';
+    expandedContent += '\n\nSay "new game" or "start over" to start a new game.';
 
     this.appSession.dashboard.content.writeToMain(mainContent);
     this.appSession.dashboard.content.writeToExpanded(expandedContent);

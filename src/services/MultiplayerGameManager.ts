@@ -136,6 +136,12 @@ export class MultiplayerGameManager {
     // Update game state
     game.currentState.board = updatedBoard;
     game.currentState.currentPlayer = game.currentState.currentPlayer === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
+    
+    // Increment move counter after Black's move (complete turn cycle)
+    if (game.currentState.currentPlayer === PlayerColor.WHITE) {
+        game.currentState.fullmoveNumber++;
+    }
+    
     game.currentState.currentFEN = boardToFEN(game.currentState);
     game.currentState.castlingRights = updateCastlingRights(
       game.currentState.board,
@@ -211,6 +217,12 @@ export class MultiplayerGameManager {
     // Update game state
     game.currentState.board = updatedBoard;
     game.currentState.currentPlayer = game.currentState.currentPlayer === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
+    
+    // Increment move counter after Black's move (complete turn cycle)
+    if (game.currentState.currentPlayer === PlayerColor.WHITE) {
+        game.currentState.fullmoveNumber++;
+    }
+    
     game.currentState.currentFEN = boardToFEN(game.currentState);
     game.currentState.castlingRights = updateCastlingRights(
       game.currentState.board,

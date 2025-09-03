@@ -4,7 +4,7 @@
  */
 
 export interface GameModeCommand {
-  type: 'ai_game' | 'friend_game' | 'random_match' | 'show_menu' | 'help' | 'accept' | 'reject' | 'cancel' | 'unknown';
+  type: 'ai_game' | 'friend_game' | 'random_match' | 'show_menu' | 'help' | 'accept' | 'reject' | 'cancel' | 'new_game' | 'unknown';
   params?: {
     difficulty?: string | undefined;
     friendName?: string | undefined;
@@ -24,6 +24,9 @@ export class GameModeCommandProcessor {
     // Random Matchmaking commands
     ['RANDOM_MATCH', /^(find|get|search\s+for)\s+(opponent|match|game)$/i],
     ['RANDOM_MATCH_QUICK', /^(quick\s+)?(match|game|play)$/i],
+    
+    // New Game command
+    ['NEW_GAME', /^(new\s+)?(game|start\s+over|restart|play\s+again)$/i],
     
     // Menu and Help commands (must come before FRIEND_NAMED)
     ['SHOW_MENU', /^(menu|options|settings)$/i],
@@ -93,6 +96,9 @@ export class GameModeCommandProcessor {
       case 'RANDOM_MATCH':
       case 'RANDOM_MATCH_QUICK':
         return { type: 'random_match' };
+        
+      case 'NEW_GAME':
+        return { type: 'new_game' };
         
       case 'SHOW_MENU':
         return { type: 'show_menu' };
@@ -217,6 +223,10 @@ export class GameModeCommandProcessor {
 • "Find opponent" - Random matchmaking
 • "Quick match" - Fast random game
 
+🔄 Game Control:
+• "New game" - Start a fresh game
+• "Start over" - Restart current game
+
 📋 Navigation:
 • "Menu" - Show main menu
 • "Help" - Show this help
@@ -225,6 +235,7 @@ export class GameModeCommandProcessor {
 • "Play against AI hard"
 • "Play against Alice"
 • "Find opponent"
+• "New game"
 • "Menu"`;
   }
   
@@ -242,6 +253,9 @@ export class GameModeCommandProcessor {
 • Say "Play against [friend name]" to challenge a friend
 • Say "Find opponent" for random matchmaking
 • Say "Quick match" for fast pairing
+
+🔄 Game Control:
+• Say "New game" to start fresh
 
 📋 Other:
 • Say "Help" for command list

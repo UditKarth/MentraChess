@@ -537,8 +537,13 @@ export class ChessServer extends AppServer {
             combinedContent += '\n🤝 STALEMATE!';
         }
         
-        // Add move count
-        combinedContent += `\nMove: ${state.fullmoveNumber}`;
+        // Add move count only when in an active game
+        if (state.mode === SessionMode.USER_TURN || 
+            state.mode === SessionMode.AI_TURN || 
+            state.mode === SessionMode.AWAITING_CLARIFICATION ||
+            (state.gameMode === 'multiplayer' && state.mode !== SessionMode.CHOOSING_GAME_MODE)) {
+            combinedContent += `\nMove: ${state.fullmoveNumber}`;
+        }
         
         // Add voice command hints
         combinedContent += '\n\nVoice Commands: "rook to d4", "pawn e5", "castle kingside"';
@@ -762,6 +767,10 @@ export class ChessServer extends AppServer {
                 const helpText = GameModeCommandProcessor.getHelpText();
                 await this.updateBoardAndFeedback(sessionId, 'Help: Say "play against AI", "play against [friend]", "find opponent", or "menu".');
                 this.updateDashboardContent(sessionId);
+                break;
+
+            case 'new_game':
+                await this.startNewGame(sessionId);
                 break;
 
             case 'accept':
@@ -1053,6 +1062,59 @@ export class ChessServer extends AppServer {
 
 
 
+    /**
+     * Start a new game, resetting the board and game state
+     */
+    private async startNewGame(sessionId: string): Promise<void> {
+        const gameSession = this.sessionManager.getSession(sessionId);
+        if (!gameSession) {
+            console.log(`[DEBUG] startNewGame: No game session found for sessionId: ${sessionId}`);
+            return;
+        }
+
+        console.log(`[DEBUG] startNewGame: Starting new game for session: ${sessionId}`);
+        const { state } = gameSession;
+        
+        try {
+            // Reset game state to initial values
+            state.board = initializeBoard();
+            state.capturedByWhite = [];
+            state.capturedByBlack = [];
+            state.currentPlayer = PlayerColor.WHITE;
+            state.currentFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+            state.castlingRights = "KQkq";
+            state.enPassantTarget = "-";
+            state.halfmoveClock = 0;
+            state.fullmoveNumber = 1;
+            state.moveHistory = [];
+            state.isCheck = false;
+            state.isCheckmate = false;
+            state.isStalemate = false;
+            state.gameResult = undefined;
+            state.clarificationData = undefined;
+            state.gameStartTime = new Date();
+            state.lastActivityTime = new Date();
+
+            // Clear any pending timeouts
+            if (state.timeoutId) {
+                clearTimeout(state.timeoutId);
+                state.timeoutId = null;
+            }
+
+            // Invalidate board cache since we have a new board
+            this.invalidateBoardCache(sessionId);
+
+            // Show the new game board
+            await this.updateBoardAndFeedback(sessionId, 'New game started! Board reset to starting position.');
+            this.updateDashboardContent(sessionId);
+
+            console.log(`[DEBUG] startNewGame: New game started successfully`);
+        } catch (error) {
+            console.error(`[DEBUG] startNewGame: Error starting new game:`, error);
+            await this.updateBoardAndFeedback(sessionId, 'Error starting new game. Please try again.');
+        }
+    }
+
     private async startGame(sessionId: string): Promise<void> {
         const gameSession = this.sessionManager.getSession(sessionId);
         if (!gameSession) {
@@ -1130,12 +1192,12 @@ export class ChessServer extends AppServer {
             
             // Skip inputs that end with common incomplete words
             const incompleteEndings = ['hel', 'he', 'h', 'pl', 'p', 'roo', 'ro', 'r', 'kni', 'kni', 'kn', 'k'];
-            const lowerInput = trimmedTranscript.toLowerCase();
             
             // Only check for incomplete endings if the input is actually incomplete
             // Complete words like "help", "menu", "play", etc. should not be flagged as incomplete
-            const completeWords = ['help', 'menu', 'play', 'game', 'ai', 'computer', 'bot', 'friend', 'buddy', 'mate', 'opponent', 'match', 'find', 'get', 'search', 'quick', 'single', 'multi', 'player', 'mode', 'easy', 'medium', 'hard', 'accept', 'reject', 'cancel', 'back', 'stop', 'yes', 'no', 'okay', 'ok', 'what', 'how', 'commands', 'options', 'settings'];
+            const completeWords = ['help', 'menu', 'play', 'game', 'ai', 'computer', 'bot', 'friend', 'buddy', 'mate', 'opponent', 'match', 'find', 'get', 'search', 'quick', 'single', 'multi', 'player', 'mode', 'easy', 'medium', 'hard', 'accept', 'reject', 'cancel', 'back', 'stop', 'yes', 'no', 'okay', 'ok', 'what', 'how', 'commands', 'options', 'settings', 'new', 'start', 'over', 'restart', 'again'];
             
+            const lowerInput = trimmedTranscript.toLowerCase();
             const isCompleteWord = completeWords.includes(lowerInput);
             const matchingEnding = incompleteEndings.find(ending => lowerInput.endsWith(ending));
             
@@ -1145,6 +1207,12 @@ export class ChessServer extends AppServer {
             }
 
             appSession.logger.debug('Processing user input', { transcript: trimmedTranscript, mode: state.mode });
+
+            // Check for global commands that work in any game state
+            if (lowerInput.includes('new game') || lowerInput.includes('start over') || lowerInput.includes('restart') || lowerInput.includes('play again')) {
+                await this.startNewGame(sessionId);
+                return;
+            }
 
             switch (state.mode) {
                 case SessionMode.CHOOSING_GAME_MODE:
@@ -1505,6 +1573,12 @@ export class ChessServer extends AppServer {
 
         // Update game state
         state.currentPlayer = state.currentPlayer === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
+        
+        // Increment move counter after Black's move (complete turn cycle)
+        if (state.currentPlayer === PlayerColor.WHITE) {
+            state.fullmoveNumber++;
+        }
+        
         state.currentFEN = boardToFEN(state);
         state.clarificationData = undefined;
         state.isCheck = validation.isCheck || false;
@@ -1576,6 +1650,12 @@ export class ChessServer extends AppServer {
 
         // Update game state
         state.currentPlayer = state.currentPlayer === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
+        
+        // Increment move counter after Black's move (complete turn cycle)
+        if (state.currentPlayer === PlayerColor.WHITE) {
+            state.fullmoveNumber++;
+        }
+        
         state.currentFEN = boardToFEN(state);
         state.clarificationData = undefined;
         state.isCheck = validation.isCheck || false;
@@ -1726,6 +1806,12 @@ export class ChessServer extends AppServer {
 
         // Update game state
         state.currentPlayer = state.currentPlayer === PlayerColor.WHITE ? PlayerColor.BLACK : PlayerColor.WHITE;
+        
+        // Increment move counter after Black's move (complete turn cycle)
+        if (state.currentPlayer === PlayerColor.WHITE) {
+            state.fullmoveNumber++;
+        }
+        
         state.currentFEN = boardToFEN(state);
         
         // Update check status for the new current player
