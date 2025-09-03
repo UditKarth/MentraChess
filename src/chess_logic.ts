@@ -94,6 +94,7 @@ export function parseMoveTranscript(transcript: string): { piece: string; target
     transcript = transcript.toLowerCase().replace(/[.]/g, ''); // Remove periods
     // Fix common voice misrecognition: 'pond' -> 'pawn', 'night' -> 'knight'
     transcript = transcript.replace(/\bpond\b/g, 'pawn');
+    transcript = transcript.replace(/\bpod\b/g, 'pawn');
     transcript = transcript.replace(/\bnight\b/g, 'knight');
 
     // More flexible regex to capture piece name and algebraic notation
