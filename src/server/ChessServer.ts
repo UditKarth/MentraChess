@@ -559,8 +559,10 @@ export class ChessServer extends AppServer {
             combinedContent += '\n\n🎮 Game Commands:';
             combinedContent += '\n• "AI" - Start an AI-based game';
             combinedContent += '\n• "Multiplayer" - Start a multiplayer game';
-            combinedContent += '\n• "White" or "Black" - Choose your color';
-            combinedContent += '\n• "Easy", "Medium", "Hard" - Set AI difficulty';
+            combinedContent += '\n\n⚙️  Settings & Preferences:';
+            combinedContent += '\n• Color and AI difficulty can be changed in app settings';
+            combinedContent += '\n• Use "Help" anytime to see available commands';
+            combinedContent += '\n• Say "New Game" to start over from any point';
         }
         
         // Add voice command hints
@@ -783,7 +785,7 @@ export class ChessServer extends AppServer {
 
             case 'help':
                 const helpText = GameModeCommandProcessor.getHelpText();
-                await this.updateBoardAndFeedback(sessionId, 'Help: Say "play against AI", "play against [friend]", "find opponent", or "menu".');
+                await this.updateBoardAndFeedback(sessionId, 'Help: Say "play against AI" or "AI" to play against the computer, "play against [friend]" to challenge a friend, "find opponent" to play against a random opponent, or "menu" to return to the main menu.');
                 this.updateDashboardContent(sessionId);
                 break;
 
