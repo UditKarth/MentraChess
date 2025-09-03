@@ -522,9 +522,13 @@ export class ChessServer extends AppServer {
             }
         }
         
-        // Add current turn information
-        const turnText = state.currentPlayer === state.userColor ? "Your turn!" : "Opponent's turn";
-        combinedContent += `\n\n${turnText}`;
+        if (state.mode === SessionMode.USER_TURN || 
+            state.mode === SessionMode.AI_TURN || 
+            state.mode === SessionMode.AWAITING_CLARIFICATION ||
+            (state.gameMode === 'multiplayer' && state.mode !== SessionMode.CHOOSING_GAME_MODE)) {
+            const turnText = state.currentPlayer === state.userColor ? "Your turn!" : "Opponent's turn";
+            combinedContent += `\n\n${turnText}`;
+        }
         
         // Add game status indicators
         if (state.isCheck) {
